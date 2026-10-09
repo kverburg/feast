@@ -1,13 +1,18 @@
 // Syncs recipes and the shopping list to Cloudflare KV via /api/state.
 // Hooks localStorage writes, so the rest of the app keeps using storageService unchanged.
-// The Gemini API key, theme and voice setting are deliberately NOT synced.
+// The Gemini API key is synced too (stored as a plain string); theme and voice setting stay per-device.
+// Everything lives in KV behind Cloudflare Access, so only the allowed users can read it.
 // If /api/state is unavailable (e.g. local dev), the app silently stays local-only.
 
 const SYNCED_KEYS: Record<string, string> = {
   gourmet_craft_recipes_v1: 'recipes',
   gourmet_craft_shopping_v1: 'shopping',
-  gourmet_craft_mealplan_v1: 'mealplan',
+  gourmet_craft_meals_v1: 'meals',
+  gourmet_craft_gemini_key_v1: 'geminiKey',
 };
+
+// Stored as a raw string in localStorage, not JSON.
+const RAW_KEYS = new Set(['gourmet_craft_gemini_key_v1']);
 
 type SyncData = Record<string, unknown>;
 
@@ -20,7 +25,7 @@ const readLocal = (): SyncData => {
   for (const [key, field] of Object.entries(SYNCED_KEYS)) {
     try {
       const raw = localStorage.getItem(key);
-      out[field] = raw ? JSON.parse(raw) : null;
+      out[field] = raw ? (RAW_KEYS.has(key) ? raw : JSON.parse(raw)) : null;
     } catch {
       out[field] = null;
     }
@@ -30,7 +35,8 @@ const readLocal = (): SyncData => {
 
 const writeLocal = (data: SyncData) => {
   for (const [key, field] of Object.entries(SYNCED_KEYS)) {
-    if (data[field] != null) nativeSetItem.call(localStorage, key, JSON.stringify(data[field]));
+    if (data[field] == null) continue;
+    nativeSetItem.call(localStorage, key, RAW_KEYS.has(key) ? String(data[field]) : JSON.stringify(data[field]));
   }
 };
 
@@ -64,10 +70,11 @@ const schedulePush = () => {
 };
 
 export const initSync = async (): Promise<void> => {
+  let remote: { rev: number; data: SyncData | null };
   try {
     const res = await fetch('/api/state', { cache: 'no-store' });
     if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return;
-    const remote = await res.json();
+    remote = await res.json();
     rev = remote.rev;
     if (remote.data) writeLocal(remote.data);
   } catch {
@@ -82,6 +89,8 @@ export const initSync = async (): Promise<void> => {
     if (document.visibilityState === 'hidden' && timer !== undefined) void push(true);
   });
 
-  // First run against an empty KV: upload what this browser already has.
-  if (rev === 0 && Object.values(readLocal()).some(Boolean)) void push();
+  // Upload anything this browser has that KV doesn't yet (first run, or a newly synced key such as the API key).
+  const local = readLocal();
+  const missingRemotely = Object.keys(local).some((f) => local[f] != null && remote.data?.[f] == null);
+  if (missingRemotely) void push();
 };

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getStoredApiKey, saveStoredApiKey } from '../services/storageService';
+import { verifyGeminiKey } from '../services/geminiService';
 import { Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
 import { Recipe } from '../types/recipe';
 import { parseCookmateXml } from '../services/cookmateImportService';
@@ -25,6 +26,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [apiKey, setApiKey] = useState(getStoredApiKey());
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const handleVerifyKey = async () => {
+    setVerifying(true);
+    setVerifyResult(null);
+    setVerifyResult(await verifyGeminiKey(apiKey.trim()));
+    setVerifying(false);
+  };
 
   const handleSaveApiKey = (e: React.FormEvent) => {
     e.preventDefault();
@@ -223,21 +233,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   type="password"
                   placeholder="AIzaSy..."
                   value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
+                  onChange={(e) => {
+                    setApiKey(e.target.value);
+                    setVerifyResult(null);
+                  }}
                   className="input-field key-input"
                 />
               </div>
             </div>
 
-            <button type="submit" className="btn btn-secondary btn-sm">
-              {savedSuccess ? <Check size={16} color="#10b981" /> : null}
-              <span>{savedSuccess ? 'API Key Saved!' : 'Save Key'}</span>
-            </button>
+            <p className="setting-desc">The key is shared across your devices.</p>
+
+            <div className="key-actions">
+              <button type="submit" className="btn btn-secondary btn-sm">
+                {savedSuccess ? <Check size={16} color="#10b981" /> : null}
+                <span>{savedSuccess ? 'API Key Saved!' : 'Save Key'}</span>
+              </button>
+              <button type="button" className="btn btn-outline btn-sm" onClick={handleVerifyKey} disabled={verifying || !apiKey.trim()}>
+                <span>{verifying ? 'Checking...' : 'Verify key'}</span>
+              </button>
+              {verifyResult && (
+                <span className={`verify-result ${verifyResult.ok ? 'ok' : 'fail'}`}>
+                  {verifyResult.ok ? '✓' : '✗'} {verifyResult.message}
+                </span>
+              )}
+            </div>
           </form>
         </div>
       </div>
 
       <style>{`
+        .key-actions {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          flex-wrap: wrap;
+        }
+        .verify-result { font-size: 0.85rem; }
+        .verify-result.ok { color: #10b981; }
+        .verify-result.fail { color: #ef4444; }
         .settings-container {
           display: flex;
           flex-direction: column;

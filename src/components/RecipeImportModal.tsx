@@ -39,14 +39,9 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
     setProgressStatus('Fetching & Extracting JSON-LD Recipe Data...');
 
     try {
-      const apiKey = getStoredApiKey();
-      let recipeData: Partial<Recipe>;
-
-      if (apiKey) {
-        recipeData = await parseRecipeWithGemini(urlInput, apiKey, false);
-      } else {
-        recipeData = await parseUrlToRecipe(urlInput);
-      }
+      // Always fetch and parse the real page. (Gemini can't open URLs; handing it the bare
+      // link made it return junk titled with the URL.)
+      const recipeData = await parseUrlToRecipe(urlInput);
 
       setParsedResult(recipeData);
     } catch (err: any) {
@@ -101,13 +96,21 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
       const apiKey = getStoredApiKey();
       let recipeData: Partial<Recipe>;
 
-      if (apiKey && imagePreview) {
-        recipeData = await parseRecipeWithGemini(imagePreview, apiKey, true);
-      } else {
-        recipeData = await parsePhotoToRecipe(selectedFile, (pct, status) => {
+      const runLocalOcr = () =>
+        parsePhotoToRecipe(selectedFile, (pct, status) => {
           setProgressPercent(pct);
           setProgressStatus(status);
         });
+
+      if (apiKey && imagePreview) {
+        try {
+          recipeData = await parseRecipeWithGemini(imagePreview, apiKey, true);
+        } catch {
+          setProgressStatus('Gemini unavailable, using local OCR...');
+          recipeData = await runLocalOcr();
+        }
+      } else {
+        recipeData = await runLocalOcr();
       }
 
       if (imagePreview) {

@@ -1,6 +1,21 @@
 import { Recipe } from '../types/recipe';
 import { parseRawTextToRecipe } from './recipeParserService';
 
+// Cheap check that a key is accepted by Google: listing models uses no quota.
+export async function verifyGeminiKey(apiKey: string): Promise<{ ok: boolean; message: string }> {
+  if (!apiKey) return { ok: false, message: 'Enter a key first.' };
+  try {
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', {
+      headers: { 'x-goog-api-key': apiKey },
+    });
+    if (res.ok) return { ok: true, message: 'Key works.' };
+    const body = await res.json().catch(() => null);
+    return { ok: false, message: body?.error?.message || `Google rejected the key (HTTP ${res.status}).` };
+  } catch {
+    return { ok: false, message: 'Could not reach Google. Check your connection.' };
+  }
+}
+
 export async function parseRecipeWithGemini(
   promptTextOrBase64Image: string,
   apiKey?: string,
@@ -12,7 +27,7 @@ export async function parseRecipeWithGemini(
   }
 
   try {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent`;
 
     const promptInstructions = `
 Analyze this recipe content and respond ONLY with a JSON object matching this schema:
@@ -60,7 +75,7 @@ Analyze this recipe content and respond ONLY with a JSON object matching this sc
 
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({ contents })
     });
 
@@ -77,8 +92,10 @@ Analyze this recipe content and respond ONLY with a JSON object matching this sc
       return parsed;
     }
 
-    return parseRawTextToRecipe(promptTextOrBase64Image);
+    throw new Error('Gemini returned no recipe data.');
   } catch (error) {
+    // Images can't be parsed as text; let the caller fall back to local OCR.
+    if (isImage) throw error;
     console.error('Gemini API parse failed, falling back to client parser', error);
     return parseRawTextToRecipe(promptTextOrBase64Image);
   }
