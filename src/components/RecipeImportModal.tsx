@@ -134,6 +134,10 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
     // Translate English → Dutch (Gemini when a key is saved, keyword fallback otherwise)
     setSaving(true);
     const dutch = await translateRecipeToDutch(parsedResult);
+    if (dutch.error && !confirm(`Gemini translation failed (${dutch.error}).\n\nSave with the basic word-by-word translation instead? It is rougher, and the recipe is re-translated automatically on a later visit once Gemini works.`)) {
+      setSaving(false);
+      return;
+    }
     const chosenCategory = parsedResult.category || 'Main';
     const chosenTitle = dutch.title || parsedResult.title || 'Geïmporteerd Recept';
     const resolvedImage = await findImageForRecipe(
@@ -432,6 +436,13 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
                   </ol>
                 </div>
               </div>
+
+              {!getStoredApiKey() && (
+                <p className="tab-hint">
+                  No Gemini key saved: ingredients and steps will only get a basic word-by-word Dutch translation.
+                  Add a key in Settings for a full translation.
+                </p>
+              )}
 
               <div className="preview-actions">
                 <button className="btn btn-secondary" onClick={() => setParsedResult(null)}>

@@ -279,16 +279,18 @@ export function translateRecipeEnToNl(recipeEn: Partial<Recipe>): DutchTranslati
  */
 export async function translateRecipeToDutch(
   recipeEn: Partial<Recipe>
-): Promise<DutchTranslation & { llm: boolean }> {
+): Promise<DutchTranslation & { llm: boolean; error?: string }> {
   const apiKey = getStoredApiKey();
+  let error: string | undefined;
   if (apiKey) {
     try {
       return { ...(await translateRecipeWithGemini(recipeEn, apiKey)), llm: true };
     } catch (e) {
       console.error('Gemini translation failed, using keyword translator', e);
+      error = e instanceof Error ? e.message : String(e);
     }
   }
-  return { ...translateRecipeEnToNl(recipeEn), llm: false };
+  return { ...translateRecipeEnToNl(recipeEn), llm: false, error };
 }
 
 const englishSource = (r: Recipe): Partial<Recipe> => ({
