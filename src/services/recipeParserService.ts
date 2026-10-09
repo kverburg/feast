@@ -269,7 +269,8 @@ export function parseHtmlContentToRecipe(htmlContent: string, sourceUrl?: string
     }
 
     // 1. Search for <script type="application/ld+json"> script tags
-    const ldScriptRegex = /<script[^>]*type=[\"'\\]*application\/ld\+json[\"'\\]*>[^>]*>([\s\S]*?)<\/script>/gi;
+    // Attributes may follow type=... (e.g. Yoast adds class="yoast-schema-graph")
+    const ldScriptRegex = /<script[^>]*type=["']?application\/ld\+json["']?[^>]*>([\s\S]*?)<\/script>/gi;
     let match: RegExpExecArray | null;
 
     while ((match = ldScriptRegex.exec(htmlContent)) !== null) {
@@ -429,7 +430,7 @@ function parseJinaMarkdownToRecipe(markdown: string, sourceUrl?: string): Partia
   }
 
   function stripListPrefix(l: string): string {
-    return l.replace(/^([*\-\s]|\[\s*[xX]?\s*\])+/, '').trim();
+    return l.replace(/^([*\-\s▢☐☑✓]|\[\s*[xX]?\s*\])+/, '').trim();
   }
 
   function looksLikeIngredient(l: string): boolean {
@@ -535,6 +536,15 @@ function parseJinaMarkdownToRecipe(markdown: string, sourceUrl?: string): Partia
     }
   }
 
+  // Some sites list steps as plain bullets instead of a numbered list
+  if (instructionSteps.length === 0 && instSectionIdx !== -1) {
+    for (let i = instStartIdx; i < finalInstEnd; i++) {
+      const bullet = lines[i].match(/^[*-]\s+(.+)/);
+      const text = bullet ? cleanMarkdown(bullet[1]) : '';
+      if (text.length > 10) instructionSteps.push(text);
+    }
+  }
+
   if (ingredientSections.length === 0 && instructionSteps.length === 0) return null;
 
   const instructions: InstructionStep[] = instructionSteps.map((text, idx) => {
@@ -568,7 +578,22 @@ function parseJinaMarkdownToRecipe(markdown: string, sourceUrl?: string): Partia
 // Fallback: HTML proxies for non-protected sites
 // ---------------------------------------------------------------------------
 export async function parseUrlToRecipe(url: string): Promise<Partial<Recipe>> {
-  // --- Primary: Jina AI reader ---
+  // --- Primary: Jina AI reader (bypasses bot protection, free, no key needed) ---
+  // 1) Ask for the raw HTML so the site's structured recipe data (JSON-LD) can be used.
+  try {
+    const htmlRes = await fetch(`https://r.jina.ai/${url}`, { headers: { 'X-Return-Format': 'html' } });
+    if (htmlRes.ok) {
+      const html = await htmlRes.text();
+      if (html.includes('ld+json')) {
+        const parsed = parseHtmlContentToRecipe(html, url);
+        if (parsed && parsed.title && parsed.title !== 'Imported Recipe' && parsed.ingredientSections?.some(s => s.items.length > 0)) {
+          return parsed;
+        }
+      }
+    }
+  } catch (_) { /* fall through to markdown */ }
+
+  // 2) Otherwise read the page as markdown and pick the recipe card out of it.
   try {
     const jinaRes = await fetch(`https://r.jina.ai/${url}`, {
       headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown' },
