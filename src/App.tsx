@@ -20,6 +20,7 @@ import { CookModeModal } from './components/CookModeModal';
 import { ShoppingList } from './components/ShoppingList';
 import { SettingsModal } from './components/SettingsModal';
 import { Meals } from './components/Meals';
+import { upgradeKeywordTranslations } from './services/translationService';
 import { Meal, getStoredMeals, saveStoredMeals } from './services/mealService';
 
 export function App() {
@@ -53,6 +54,11 @@ export function App() {
     const loadedTheme = getStoredTheme();
     setTheme(loadedTheme);
     document.documentElement.setAttribute('data-theme', loadedTheme);
+
+    // Quietly re-translate older keyword-translated recipes with Gemini (needs a saved key)
+    upgradeKeywordTranslations().then((changed) => {
+      if (changed) setRecipes(getStoredRecipes());
+    });
 
     const loadedVoice = getStoredVoiceEnabled();
     setVoiceEnabled(loadedVoice);

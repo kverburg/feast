@@ -3,7 +3,7 @@ import { Recipe } from '../types/recipe';
 import { parseUrlToRecipe, parsePhotoToRecipe, parseHtmlContentToRecipe, parseRawTextToRecipe } from '../services/recipeParserService';
 import { parseRecipeWithGemini } from '../services/geminiService';
 import { getStoredApiKey } from '../services/storageService';
-import { translateRecipeEnToNl } from '../services/translationService';
+import { translateRecipeToDutch } from '../services/translationService';
 import { findImageForRecipe } from '../services/imageSearchService';
 import { Globe, Camera, Upload, Sparkles, X, Check, Loader2, FileText, Layers, Clipboard } from 'lucide-react';
 
@@ -24,6 +24,7 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [progressStatus, setProgressStatus] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
@@ -128,8 +129,9 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
   const handleSaveImported = async () => {
     if (!parsedResult) return;
 
-    // Translate English → Dutch
-    const dutch = translateRecipeEnToNl(parsedResult);
+    // Translate English → Dutch (Gemini when a key is saved, keyword fallback otherwise)
+    setSaving(true);
+    const dutch = await translateRecipeToDutch(parsedResult);
     const chosenCategory = parsedResult.category || 'Main';
     const chosenTitle = dutch.title || parsedResult.title || 'Geïmporteerd Recept';
     const resolvedImage = await findImageForRecipe(
@@ -160,8 +162,10 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
       descriptionEn: parsedResult.description || undefined,
       ingredientSectionsEn: parsedResult.ingredientSections || undefined,
       instructionsEn: parsedResult.instructions || undefined,
+      translationVersion: dutch.llm ? 2 : undefined,
     };
 
+    setSaving(false);
     onImportComplete(finalRecipe);
   };
 
@@ -412,9 +416,9 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
                 <button className="btn btn-secondary" onClick={() => setParsedResult(null)}>
                   Re-parse
                 </button>
-                <button className="btn btn-primary" onClick={handleSaveImported}>
+                <button className="btn btn-primary" onClick={handleSaveImported} disabled={saving}>
                   <Check size={18} />
-                  <span>Save to My Recipes</span>
+                  <span>{saving ? 'Translating & saving...' : 'Save to My Recipes'}</span>
                 </button>
               </div>
             </div>

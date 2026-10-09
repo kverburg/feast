@@ -1,4 +1,6 @@
 import { Recipe, IngredientSection, InstructionStep, IngredientItem } from '../types/recipe';
+import { translateRecipeWithGemini } from './geminiService';
+import { getStoredApiKey, getStoredRecipes, saveStoredRecipes } from './storageService';
 
 // ---------------------------------------------------------------------------
 // Dictionaries
@@ -269,4 +271,82 @@ export function translateRecipeEnToNl(recipeEn: Partial<Recipe>): DutchTranslati
   }));
 
   return { title, description, ingredientSections, instructions };
+}
+
+/**
+ * Translate to Dutch with Gemini when a key is saved; otherwise (or if the call fails)
+ * fall back to the keyword translator. `llm` tells the caller which one produced the result.
+ */
+export async function translateRecipeToDutch(
+  recipeEn: Partial<Recipe>
+): Promise<DutchTranslation & { llm: boolean }> {
+  const apiKey = getStoredApiKey();
+  if (apiKey) {
+    try {
+      return { ...(await translateRecipeWithGemini(recipeEn, apiKey)), llm: true };
+    } catch (e) {
+      console.error('Gemini translation failed, using keyword translator', e);
+    }
+  }
+  return { ...translateRecipeEnToNl(recipeEn), llm: false };
+}
+
+const englishSource = (r: Recipe): Partial<Recipe> => ({
+  title: r.titleEn,
+  description: r.descriptionEn,
+  ingredientSections: r.ingredientSectionsEn,
+  instructions: r.instructionsEn,
+});
+
+// True when the stored Dutch text is exactly what the keyword translator produced,
+// i.e. the user never edited it and replacing it loses nothing.
+const isUntouchedKeywordTranslation = (r: Recipe): boolean => {
+  if (!r.titleEn || !r.ingredientSectionsEn || !r.instructionsEn) return false;
+  const kw = translateRecipeEnToNl(englishSource(r));
+  const sameStructure =
+    JSON.stringify([kw.title, kw.ingredientSections, kw.instructions]) ===
+    JSON.stringify([r.title, r.ingredientSections, r.instructions]);
+  // Import falls back to the English text or a placeholder when there is no description.
+  const sameDescription = [kw.description, r.descriptionEn, 'Geïmporteerd via Feast.', ''].includes(r.description);
+  return sameStructure && sameDescription;
+};
+
+/**
+ * One-time upgrade: recipes imported before the Gemini translation get re-translated
+ * from their stored English original, if their Dutch text was never hand-edited.
+ * Runs quietly in the background; stops at the first failure and tries again next visit.
+ * Returns true when at least one recipe changed.
+ */
+let upgradeRun: Promise<boolean> | null = null;
+
+export function upgradeKeywordTranslations(): Promise<boolean> {
+  upgradeRun ??= runUpgrade();
+  return upgradeRun;
+}
+
+async function runUpgrade(): Promise<boolean> {
+  if (!getStoredApiKey()) return false;
+  const candidates = getStoredRecipes().filter(
+    (r) => !r.id.startsWith('seed-') && r.translationVersion !== 2 && isUntouchedKeywordTranslation(r)
+  );
+  let changed = false;
+  for (const candidate of candidates) {
+    const result = await translateRecipeToDutch(englishSource(candidate));
+    if (!result.llm) break;
+    // Re-read storage so edits made while we were waiting are not overwritten.
+    const latest = getStoredRecipes();
+    const idx = latest.findIndex((r) => r.id === candidate.id);
+    if (idx === -1 || !isUntouchedKeywordTranslation(latest[idx])) continue;
+    latest[idx] = {
+      ...latest[idx],
+      title: result.title,
+      description: result.description,
+      ingredientSections: result.ingredientSections,
+      instructions: result.instructions,
+      translationVersion: 2,
+    };
+    saveStoredRecipes(latest);
+    changed = true;
+  }
+  return changed;
 }

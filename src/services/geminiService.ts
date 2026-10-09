@@ -1,4 +1,4 @@
-import { Recipe } from '../types/recipe';
+import { Recipe, IngredientSection, InstructionStep } from '../types/recipe';
 import { parseRawTextToRecipe } from './recipeParserService';
 
 // Cheap check that a key is accepted by Google: listing models uses no quota.
@@ -99,4 +99,83 @@ Analyze this recipe content and respond ONLY with a JSON object matching this sc
     console.error('Gemini API parse failed, falling back to client parser', error);
     return parseRawTextToRecipe(promptTextOrBase64Image);
   }
+}
+
+export interface GeminiDutchRecipe {
+  title: string;
+  description: string;
+  ingredientSections: IngredientSection[];
+  instructions: InstructionStep[];
+}
+
+// Translate a whole recipe to natural Dutch in one call. Structure, amounts and timers come from
+// the original; only wording (and unit labels such as cloves -> teentjes) is taken from the model.
+export async function translateRecipeWithGemini(
+  recipe: Partial<Recipe>,
+  apiKey: string
+): Promise<GeminiDutchRecipe> {
+  const source = {
+    title: recipe.title || '',
+    description: recipe.description || '',
+    ingredientSections: (recipe.ingredientSections || []).map((s) => ({
+      title: s.title,
+      items: s.items.map((i) => ({ amount: i.amount, unit: i.unit, name: i.name, notes: i.notes ?? null })),
+    })),
+    instructions: (recipe.instructions || []).map((st) => ({ text: st.text })),
+  };
+
+  const prompt = `Translate this recipe from English to Dutch, the way a good Dutch cookbook would write it.
+Rules:
+- Natural, fluent Dutch for home cooks. Use the usual Dutch cooking terms; do not translate word by word.
+- Ingredient names: normal Dutch names in lowercase unless a proper noun (e.g. "Parmigiano-Reggiano"). Keep brand names.
+- Units: Dutch abbreviations (g, kg, ml, l, el for tablespoon, tl for teaspoon), or "teentje"/"teentjes", "snufje", "stuk"/"stuks", "bosje". Do not convert amounts or switch unit systems.
+- Keep every number, the number of sections, items and steps, and their order exactly as given. Do not add or remove anything.
+- Respond ONLY with JSON of exactly the same shape as the input ("notes" stays null when it is null).
+
+Recipe JSON:
+${JSON.stringify(source)}`;
+
+  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+    }),
+  });
+  if (!res.ok) throw new Error(`Gemini API returned status ${res.status}`);
+
+  const data = await res.json();
+  const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const out = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+
+  const sections = recipe.ingredientSections || [];
+  const steps = recipe.instructions || [];
+  const valid =
+    typeof out.title === 'string' &&
+    Array.isArray(out.ingredientSections) &&
+    out.ingredientSections.length === sections.length &&
+    out.ingredientSections.every((s: any, i: number) => Array.isArray(s.items) && s.items.length === sections[i].items.length) &&
+    Array.isArray(out.instructions) &&
+    out.instructions.length === steps.length;
+  if (!valid) throw new Error('Gemini returned a translation with a different structure.');
+
+  return {
+    title: out.title || recipe.title || '',
+    description: typeof out.description === 'string' ? out.description : recipe.description || '',
+    ingredientSections: sections.map((section, si) => ({
+      ...section,
+      title: out.ingredientSections[si].title || section.title,
+      items: section.items.map((item, ii) => {
+        const t = out.ingredientSections[si].items[ii];
+        return {
+          ...item,
+          name: t.name || item.name,
+          unit: typeof t.unit === 'string' ? t.unit : item.unit,
+          notes: item.notes ? t.notes || item.notes : item.notes,
+        };
+      }),
+    })),
+    instructions: steps.map((step, i) => ({ ...step, text: out.instructions[i].text || step.text })),
+  };
 }
