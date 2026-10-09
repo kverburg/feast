@@ -31,7 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="brand-icon">
               <UtensilsCrossed size={24} color="#ffffff" />
             </div>
-            <span className="brand-name">Gourmet<span className="brand-highlight">Craft</span></span>
+            <span className="brand-name">Feast</span>
             {(import.meta as any).env?.VITE_APP_ENV === 'preview' && <span className="env-badge">TEST</span>}
           </div>
 
@@ -51,6 +51,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               <CalendarDays size={16} />
               <span>Meals</span>
             </button>
+            <button className={`btn btn-secondary btn-sm ${currentTab === 'shopping' ? 'active' : ''}`} onClick={() => setCurrentTab('shopping')} title="Shopping List">
+              <ShoppingBag size={16} />
+              <span>Shopping</span>
+            </button>
             <button className="btn btn-outline btn-sm" onClick={onOpenImportModal}>
               <Sparkles size={16} />
               <span>Import Recipe</span>
@@ -61,6 +65,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button className="btn btn-secondary btn-icon" onClick={toggleTheme} title="Toggle Dark/Light Mode">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button className={`btn btn-secondary btn-icon ${currentTab === 'settings' ? 'active' : ''}`} onClick={() => setCurrentTab('settings')} title="Settings & Backup">
+              <Settings size={18} />
             </button>
           </div>
         </div>

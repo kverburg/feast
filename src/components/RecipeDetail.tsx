@@ -64,6 +64,17 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   onStartCookMode,
   onAddToShoppingList,
 }) => {
+  // Language toggle: 'nl' = Dutch (default), 'en' = original English
+  const [language, setLanguage] = useState<'nl' | 'en'>('nl');
+
+  const hasEnglish = !!(recipe.titleEn || recipe.instructionsEn);
+
+  // Displayed fields based on selected language
+  const displayTitle = language === 'en' && recipe.titleEn ? recipe.titleEn : recipe.title;
+  const displayDescription = language === 'en' && recipe.descriptionEn ? recipe.descriptionEn : recipe.description;
+  const displaySections = language === 'en' && recipe.ingredientSectionsEn ? recipe.ingredientSectionsEn : recipe.ingredientSections;
+  const displayInstructions = language === 'en' && recipe.instructionsEn ? recipe.instructionsEn : recipe.instructions;
+
   // Portion Scaling State
   const [currentServings, setCurrentServings] = useState<number>(recipe.servings || 4);
   const [unitSystem, setUnitSystem] = useState<'metric' | 'imperial'>('metric');
@@ -72,6 +83,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   const [activeTimer, setActiveTimer] = useState<{ stepId: string; secondsLeft: number } | null>(null);
 
   const scaleRatio = currentServings / (recipe.servings || 1);
+
 
   const toggleIngredientCheck = (id: string) => {
     setCheckedIngredients(prev => ({ ...prev, [id]: !prev[id] }));
@@ -87,7 +99,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
 
   const handleAddAllToShopping = () => {
     const itemsToAdd: any[] = [];
-    recipe.ingredientSections.forEach(section => {
+    displaySections.forEach(section => {
       section.items.forEach(item => {
         const scaledAmt = item.amount * scaleRatio;
         const converted = convertUnit(scaledAmt, item.unit, unitSystem, item.name);
@@ -105,6 +117,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
     });
     onAddToShoppingList(itemsToAdd);
   };
+
 
   return (
     <div className="recipe-detail-container">
@@ -130,7 +143,18 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
       {/* Hero Header */}
       <div className="hero-card card">
         <div className="hero-image-container">
-          <img src={recipe.image} alt={recipe.title} className="hero-image" />
+          <img
+            src={recipe.image}
+            alt={recipe.title}
+            className="hero-image"
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (!target.dataset.triedFallback) {
+                target.dataset.triedFallback = 'true';
+                target.src = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1000&q=80';
+              }
+            }}
+          />
           <div className="hero-overlay-gradient"></div>
 
           <div className="hero-badge-group">
@@ -145,8 +169,8 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         </div>
 
         <div className="hero-content">
-          <h1 className="hero-title">{recipe.title}</h1>
-          <p className="hero-description">{recipe.description}</p>
+          <h1 className="hero-title">{displayTitle}</h1>
+          <p className="hero-description">{displayDescription}</p>
 
           <div className="hero-stats">
             <div className="stat-card">
@@ -186,6 +210,25 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                 <span>Source Link</span>
               </a>
             )}
+
+            {hasEnglish && (
+              <div className="lang-toggle-group">
+                <button
+                  className={`lang-btn ${language === 'nl' ? 'active' : ''}`}
+                  onClick={() => setLanguage('nl')}
+                  title="Toon in het Nederlands"
+                >
+                  🇳🇱 NL
+                </button>
+                <button
+                  className={`lang-btn ${language === 'en' ? 'active' : ''}`}
+                  onClick={() => setLanguage('en')}
+                  title="Show in English"
+                >
+                  🇬🇧 EN
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -197,7 +240,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           <div className="column-header">
             <div className="column-title-group">
               <Layers size={22} color="var(--accent-primary)" />
-              <h2>Ingredients <span className="parts-tag">({recipe.ingredientSections?.length || 1} parts)</span></h2>
+              <h2>Ingrediënten <span className="parts-tag">({displaySections?.length || 1} parts)</span></h2>
             </div>
 
             <button className="btn btn-outline btn-sm" onClick={handleAddAllToShopping}>
@@ -249,7 +292,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
 
           {/* Sections List */}
           <div className="sections-container">
-            {recipe.ingredientSections && recipe.ingredientSections.map((section) => (
+            {displaySections && displaySections.map((section) => (
               <div key={section.id} className="ingredient-section">
                 <h3 className="section-title">
                   <span className="title-bullet"></span>
@@ -285,17 +328,18 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
               </div>
             ))}
           </div>
+
         </div>
 
         {/* Right Column: Step-by-Step Instructions */}
         <div className="instructions-column card">
           <div className="column-header">
-            <h2>Step-by-Step Method</h2>
-            <span className="badge badge-secondary">{recipe.instructions?.length || 0} Steps</span>
+            <h2>Stap voor Stap</h2>
+            <span className="badge badge-secondary">{displayInstructions?.length || 0} Stappen</span>
           </div>
 
           <div className="steps-container">
-            {recipe.instructions && recipe.instructions.map((step) => {
+            {displayInstructions && displayInstructions.map((step) => {
               const isChecked = !!checkedSteps[step.id];
 
               return (
@@ -326,6 +370,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
               );
             })}
           </div>
+
         </div>
       </div>
 
@@ -657,6 +702,34 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           color: var(--accent-primary);
           border-color: var(--accent-primary);
         }
+        .lang-toggle-group {
+          display: flex;
+          gap: 0.25rem;
+          background: var(--bg-primary);
+          border: 1px solid var(--border-color);
+          padding: 0.25rem;
+          border-radius: var(--radius-md);
+          margin-left: auto;
+        }
+        .lang-btn {
+          padding: 0.35rem 0.75rem;
+          border-radius: var(--radius-sm);
+          border: none;
+          background: none;
+          color: var(--text-muted);
+          font-weight: 700;
+          font-size: 0.82rem;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .lang-btn.active {
+          background: var(--accent-primary);
+          color: #ffffff;
+        }
+        .lang-btn:hover:not(.active) {
+          background: var(--bg-card-hover);
+        }
+
       `}</style>
     </div>
   );
