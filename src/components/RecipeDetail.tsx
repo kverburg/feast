@@ -169,6 +169,11 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         <div className="hero-content">
           <h1 className="hero-title">{displayTitle}</h1>
           <p className="hero-description">{displayDescription}</p>
+          {recipe.translationPending && language === 'nl' && (
+            <p className="hero-description" style={{ fontSize: '0.85rem', opacity: 0.7 }}>
+              Nederlandse vertaling volgt… (staat in de wachtrij)
+            </p>
+          )}
 
           <div className="hero-stats">
             <div className="stat-card">

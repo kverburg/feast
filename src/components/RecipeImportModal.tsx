@@ -137,12 +137,12 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
     // Translate English → Dutch (Gemini when a key is saved, keyword fallback otherwise)
     setSaving(true);
     const dutch = await translateRecipeToDutch(parsedResult);
-    if (dutch.error && !confirm(`Gemini translation failed (${dutch.error}).\n\nSave with the basic word-by-word translation instead? It is rougher, and the recipe is re-translated automatically on a later visit once Gemini works.`)) {
-      setSaving(false);
-      return;
-    }
+    // If Gemini failed (rate limit, offline, ...) the recipe is saved in English and queued for translation.
+    const queued = !!dutch.error;
     const chosenCategory = parsedResult.category || 'Main';
-    const chosenTitle = dutch.title || parsedResult.title || 'Geïmporteerd Recept';
+    const chosenTitle = queued
+      ? parsedResult.title || 'Imported Recipe'
+      : dutch.title || parsedResult.title || 'Geïmporteerd Recept';
     const resolvedImage = await findImageForRecipe(
       chosenTitle,
       chosenCategory,
@@ -154,15 +154,17 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
       id: `imported-${Date.now()}`,
       // Dutch as default
       title: chosenTitle,
-      description: dutch.description || parsedResult.description || 'Geïmporteerd via Feast.',
+      description: queued
+        ? parsedResult.description || ''
+        : dutch.description || parsedResult.description || 'Geïmporteerd via Feast.',
       category: chosenCategory,
       prepTime: parsedResult.prepTime || 15,
       cookTime: parsedResult.cookTime || 20,
       servings: parsedResult.servings || 4,
       image: resolvedImage,
       sourceUrl: parsedResult.sourceUrl || (activeTab === 'url' ? urlInput : undefined),
-      ingredientSections: dutch.ingredientSections || parsedResult.ingredientSections || [],
-      instructions: dutch.instructions || parsedResult.instructions || [],
+      ingredientSections: (queued ? undefined : dutch.ingredientSections) || parsedResult.ingredientSections || [],
+      instructions: (queued ? undefined : dutch.instructions) || parsedResult.instructions || [],
       tags: parsedResult.tags || ['Imported'],
       isFavorite: false,
       createdAt: new Date().toISOString(),
@@ -172,6 +174,7 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
       ingredientSectionsEn: parsedResult.ingredientSections || undefined,
       instructionsEn: parsedResult.instructions || undefined,
       translationVersion: dutch.llm ? 2 : undefined,
+      translationPending: queued || undefined,
     };
 
     setSaving(false);

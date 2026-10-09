@@ -1,5 +1,5 @@
 import { Recipe, IngredientSection, InstructionStep, IngredientItem } from '../types/recipe';
-import { translateRecipeWithGemini, isGeminiAvailable, GeminiUnavailableError } from './geminiService';
+import { translateRecipeWithGemini, isGeminiAvailable, GeminiUnavailableError, classifyGeminiError } from './geminiService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
 
 // ---------------------------------------------------------------------------
@@ -313,42 +313,93 @@ const isUntouchedKeywordTranslation = (r: Recipe): boolean => {
   return sameStructure && sameDescription;
 };
 
-/**
- * One-time upgrade: recipes imported before the Gemini translation get re-translated
- * from their stored English original, if their Dutch text was never hand-edited.
- * Runs quietly in the background; stops at the first failure and tries again next visit.
- * Returns true when at least one recipe changed.
- */
-let upgradeRun: Promise<boolean> | null = null;
+// A queued recipe still carries the English text in its main fields; untouched means it still does.
+const isUntouchedPending = (r: Recipe): boolean =>
+  !!r.translationPending &&
+  JSON.stringify([r.title, r.ingredientSections, r.instructions]) ===
+    JSON.stringify([r.titleEn, r.ingredientSectionsEn, r.instructionsEn]);
 
-export function upgradeKeywordTranslations(): Promise<boolean> {
-  upgradeRun ??= runUpgrade();
-  return upgradeRun;
+const needsTranslation = (r: Recipe): boolean =>
+  !r.id.startsWith('seed-') && r.translationVersion !== 2 && (isUntouchedPending(r) || isUntouchedKeywordTranslation(r));
+
+// ---------------------------------------------------------------------------
+// Translation queue
+// Recipes that could not be translated right away (rate limit, offline, ...) are saved in
+// English with translationPending, and translated here in the background, one at a time.
+// Older keyword-translated recipes are picked up the same way. The queue survives reloads
+// because the flag lives on the recipe itself.
+// ---------------------------------------------------------------------------
+
+const GAP_BETWEEN_CALLS_MS = 6000; // stay under free-tier requests-per-minute
+const FIRST_BACKOFF_MS = 60_000;
+const MAX_BACKOFF_MS = 15 * 60_000;
+const MAX_BAD_OUTPUT_ATTEMPTS = 3;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+let queueRunning = false;
+const badOutputAttempts = new Map<string, number>();
+
+/**
+ * Start (or nudge) the background translation queue. Safe to call any time: if it is already
+ * running it will pick up newly queued recipes by itself. `onChange` fires after each recipe is
+ * translated so the UI can reload from storage.
+ */
+export function startTranslationQueue(onChange: () => void): void {
+  if (queueRunning) return;
+  queueRunning = true;
+  runQueue(onChange).finally(() => {
+    queueRunning = false;
+  });
 }
 
-async function runUpgrade(): Promise<boolean> {
-  if (!(await isGeminiAvailable())) return false;
-  const candidates = getStoredRecipes().filter(
-    (r) => !r.id.startsWith('seed-') && r.translationVersion !== 2 && isUntouchedKeywordTranslation(r)
-  );
-  let changed = false;
-  for (const candidate of candidates) {
-    const result = await translateRecipeToDutch(englishSource(candidate));
-    if (!result.llm) break;
-    // Re-read storage so edits made while we were waiting are not overwritten.
-    const latest = getStoredRecipes();
-    const idx = latest.findIndex((r) => r.id === candidate.id);
-    if (idx === -1 || !isUntouchedKeywordTranslation(latest[idx])) continue;
-    latest[idx] = {
-      ...latest[idx],
-      title: result.title,
-      description: result.description,
-      ingredientSections: result.ingredientSections,
-      instructions: result.instructions,
-      translationVersion: 2,
-    };
-    saveStoredRecipes(latest);
-    changed = true;
+async function runQueue(onChange: () => void): Promise<void> {
+  if (!(await isGeminiAvailable())) return;
+  let backoff = FIRST_BACKOFF_MS;
+
+  // A recipe edited by hand while it was queued no longer wants the automatic translation.
+  const stored = getStoredRecipes();
+  if (stored.some((r) => r.translationPending && !isUntouchedPending(r))) {
+    saveStoredRecipes(stored.map((r) => (r.translationPending && !isUntouchedPending(r) ? { ...r, translationPending: false } : r)));
+    onChange();
   }
-  return changed;
+
+  for (;;) {
+    const next = getStoredRecipes().find(
+      (r) => needsTranslation(r) && (badOutputAttempts.get(r.id) ?? 0) < MAX_BAD_OUTPUT_ATTEMPTS
+    );
+    if (!next) return;
+
+    try {
+      const result = await translateRecipeWithGemini(englishSource(next));
+      // Re-read storage so edits made while we were waiting are not overwritten.
+      const latest = getStoredRecipes();
+      const idx = latest.findIndex((r) => r.id === next.id);
+      if (idx !== -1 && needsTranslation(latest[idx])) {
+        latest[idx] = {
+          ...latest[idx],
+          title: result.title,
+          description: result.description,
+          ingredientSections: result.ingredientSections,
+          instructions: result.instructions,
+          translationVersion: 2,
+          translationPending: false,
+        };
+        saveStoredRecipes(latest);
+        onChange();
+      }
+      backoff = FIRST_BACKOFF_MS;
+      await sleep(GAP_BETWEEN_CALLS_MS);
+    } catch (e) {
+      const kind = classifyGeminiError(e);
+      if (kind === 'transient') {
+        await sleep(backoff);
+        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+      } else if (kind === 'other') {
+        badOutputAttempts.set(next.id, (badOutputAttempts.get(next.id) ?? 0) + 1);
+      } else {
+        return; // no key, or the key/request is rejected: retry on the next visit
+      }
+    }
+  }
 }

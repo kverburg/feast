@@ -3,6 +3,23 @@ import { parseRawTextToRecipe } from './recipeParserService';
 
 import { getStoredApiKey } from './storageService';
 
+export class GeminiHttpError extends Error {
+  constructor(public status: number) {
+    super(`Gemini API returned status ${status}`);
+  }
+}
+
+// transient: worth retrying later (rate limit, server hiccup, offline); fatal: retrying will not help
+// until something changes (bad key, bad request); unavailable: no key anywhere; other: bad model output.
+export type GeminiErrorKind = 'transient' | 'fatal' | 'unavailable' | 'other';
+
+export const classifyGeminiError = (e: unknown): GeminiErrorKind => {
+  if (e instanceof GeminiUnavailableError) return 'unavailable';
+  if (e instanceof GeminiHttpError) return e.status === 429 || e.status >= 500 ? 'transient' : 'fatal';
+  if (e instanceof TypeError) return 'transient'; // fetch failed: offline or blocked
+  return 'other';
+};
+
 // Thrown when there is no key to use: none saved in Settings and none configured on the server.
 export class GeminiUnavailableError extends Error {}
 
@@ -35,7 +52,7 @@ async function geminiGenerate(body: unknown): Promise<any> {
     // 403/non-JSON: no worker behind this page (local dev) or not logged in through Access.
     if (!isJson || res.status === 403 || notConfigured) throw new GeminiUnavailableError('No Gemini key available.');
   }
-  if (!res.ok) throw new Error(`Gemini API returned status ${res.status}`);
+  if (!res.ok) throw new GeminiHttpError(res.status);
   return res.json();
 }
 

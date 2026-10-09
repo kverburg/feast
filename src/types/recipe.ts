@@ -43,6 +43,8 @@ export interface Recipe {
   instructionsEn?: InstructionStep[];
   // 2 = Dutch text was written by the Gemini translation (1/undefined = keyword translation)
   translationVersion?: number;
+  // True while the Dutch version is waiting in the translation queue (shown as English meanwhile)
+  translationPending?: boolean;
 }
 
 export interface ShoppingItem {

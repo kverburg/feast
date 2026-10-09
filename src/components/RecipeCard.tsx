@@ -52,6 +52,9 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
 
       <div className="card-content">
         <h3 className="card-title">{recipe.title}</h3>
+        {recipe.translationPending && language === 'nl' && (
+          <span className="translation-pending">Nederlandse vertaling volgt…</span>
+        )}
         <p className="card-description">{recipe.description}</p>
 
         <div className="card-meta">
@@ -134,6 +137,12 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
           display: flex;
           flex-direction: column;
           flex: 1;
+        }
+        .translation-pending {
+          display: inline-block;
+          font-size: 0.72rem;
+          color: var(--text-muted);
+          margin-bottom: 0.35rem;
         }
         .card-title {
           font-size: 1.15rem;
