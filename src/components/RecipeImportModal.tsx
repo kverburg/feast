@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Recipe } from '../types/recipe';
 import { parseUrlToRecipe, parsePhotoToRecipe, parseHtmlContentToRecipe, parseRawTextToRecipe } from '../services/recipeParserService';
 import { parseRecipeWithGemini, isGeminiAvailable } from '../services/geminiService';
-import { translateRecipeEnToNl } from '../services/translationService';
+import { withPendingTranslation } from '../services/translationService';
 import { findImageForRecipe } from '../services/imageSearchService';
 import { Globe, Camera, Upload, Sparkles, X, Check, Loader2, FileText, Layers, Clipboard, PenLine } from 'lucide-react';
 
@@ -134,15 +134,10 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
   const handleSaveImported = async () => {
     if (!parsedResult) return;
 
-    // With Gemini available the recipe is saved right away in English and the background queue
-    // translates it. Without it, the instant keyword translation is used.
+    // The recipe is saved right away in English; the background queue translates it with Gemini.
     setSaving(true);
-    const queued = geminiAvailable === true;
-    const dutch = queued ? null : translateRecipeEnToNl(parsedResult);
     const chosenCategory = parsedResult.category || 'Main';
-    const chosenTitle = queued
-      ? parsedResult.title || 'Imported Recipe'
-      : dutch?.title || parsedResult.title || 'Geïmporteerd Recept';
+    const chosenTitle = parsedResult.title || 'Imported Recipe';
     const resolvedImage = await findImageForRecipe(
       chosenTitle,
       chosenCategory,
@@ -150,31 +145,22 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
       parsedResult.tags || []
     );
 
-    const finalRecipe: Recipe = {
+    const finalRecipe: Recipe = withPendingTranslation({
       id: `imported-${Date.now()}`,
-      // Dutch as default
       title: chosenTitle,
-      description: queued
-        ? parsedResult.description || ''
-        : dutch?.description || parsedResult.description || 'Geïmporteerd via Feast.',
+      description: parsedResult.description || '',
       category: chosenCategory,
       prepTime: parsedResult.prepTime || 15,
       cookTime: parsedResult.cookTime || 20,
       servings: parsedResult.servings || 4,
       image: resolvedImage,
       sourceUrl: parsedResult.sourceUrl || (activeTab === 'url' ? urlInput : undefined),
-      ingredientSections: dutch?.ingredientSections || parsedResult.ingredientSections || [],
-      instructions: dutch?.instructions || parsedResult.instructions || [],
+      ingredientSections: parsedResult.ingredientSections || [],
+      instructions: parsedResult.instructions || [],
       tags: parsedResult.tags || ['Imported'],
       isFavorite: false,
       createdAt: new Date().toISOString(),
-      // Original English preserved
-      titleEn: parsedResult.title || undefined,
-      descriptionEn: parsedResult.description || undefined,
-      ingredientSectionsEn: parsedResult.ingredientSections || undefined,
-      instructionsEn: parsedResult.instructions || undefined,
-      translationPending: queued || undefined,
-    };
+    });
 
     setSaving(false);
     onImportComplete(finalRecipe);
@@ -443,17 +429,19 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
               </div>
 
               {geminiAvailable === false && (
-                <p className="tab-hint">
-                  No Gemini key available: ingredients and steps will only get a basic word-by-word Dutch translation.
-                  Add a key in Settings for a full translation.
-                </p>
+                <div className="error-box card">
+                  <p>
+                    Gemini API key missing: this recipe cannot be translated to Dutch, so it can't be saved yet.
+                    Add a key in Settings first.
+                  </p>
+                </div>
               )}
 
               <div className="preview-actions">
                 <button className="btn btn-secondary" onClick={() => setParsedResult(null)}>
                   Re-parse
                 </button>
-                <button className="btn btn-primary" onClick={handleSaveImported} disabled={saving}>
+                <button className="btn btn-primary" onClick={handleSaveImported} disabled={saving || geminiAvailable === false}>
                   <Check size={18} />
                   <span>{saving ? 'Saving...' : 'Save to My Recipes'}</span>
                 </button>

@@ -23,13 +23,15 @@ import { CookModeModal } from './components/CookModeModal';
 import { ShoppingList } from './components/ShoppingList';
 import { SettingsModal } from './components/SettingsModal';
 import { Meals } from './components/Meals';
-import { startTranslationQueue } from './services/translationService';
+import { startTranslationQueue, subscribeTranslationChange, subscribeTranslationError } from './services/translationService';
+import { ErrorBanner } from './components/ErrorBanner';
 import { Meal, getStoredMeals, saveStoredMeals } from './services/mealService';
 
 export function App() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
+  const [translationError, setTranslationError] = useState<string | null>(null);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [currentTab, setCurrentTab] = useState<'recipes' | 'meals' | 'shopping' | 'settings'>('recipes');
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,10 +66,17 @@ export function App() {
     document.documentElement.setAttribute('data-theme', loadedTheme);
 
     // Background queue: translates recipes that are waiting for a Dutch version (needs a Gemini key)
-    startTranslationQueue(() => setRecipes(getStoredRecipes()));
+    const unsubscribeChange = subscribeTranslationChange(() => setRecipes(getStoredRecipes()));
+    const unsubscribeError = subscribeTranslationError(setTranslationError);
+    startTranslationQueue();
 
     const loadedVoice = getStoredVoiceEnabled();
     setVoiceEnabled(loadedVoice);
+
+    return () => {
+      unsubscribeChange();
+      unsubscribeError();
+    };
   }, []);
 
   const handleToggleVoice = (enabled: boolean) => {
@@ -133,7 +142,7 @@ export function App() {
     setRecipes(updated);
     saveStoredRecipes(updated);
     setIsImportOpen(false);
-    if (importedRecipe.translationPending) startTranslationQueue(() => setRecipes(getStoredRecipes()));
+    startTranslationQueue();
     setSelectedRecipe(importedRecipe);
     setCurrentTab('recipes');
   };
@@ -181,6 +190,17 @@ export function App() {
         language={language}
         setLanguage={setLanguage}
       />
+
+      {translationError && (
+        <ErrorBanner
+          message={translationError}
+          actionLabel="Open Settings"
+          onAction={() => {
+            setCurrentTab('settings');
+            setSelectedRecipe(null);
+          }}
+        />
+      )}
 
       {/* Main Content Body */}
       <main className="main-content">
@@ -233,6 +253,7 @@ export function App() {
             onImportBackup={(newRecipes) => {
               setRecipes(newRecipes);
               saveStoredRecipes(newRecipes);
+              startTranslationQueue(); // imported English recipes may be waiting for translation
             }}
             onResetSeed={handleResetSeed}
             theme={theme}

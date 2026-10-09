@@ -1,6 +1,6 @@
 import { Recipe, IngredientSection, InstructionStep } from '../types/recipe';
 import { parseIngredientLine } from './recipeParserService';
-import { translateRecipeEnToNl } from './translationService';
+import { withPendingTranslation } from './translationService';
 import { findImageForRecipe } from './imageSearchService';
 
 function parseDurationString(str: string): number {
@@ -172,21 +172,10 @@ export async function parseCookmateXml(xmlString: string): Promise<Recipe[]> {
       createdAt: new Date().toISOString(),
     };
 
-    // If language is English, auto-translate to Dutch as default and preserve original English in *En
-    if (lang === 'en' || (!lang && /^(apple|banana|pie|chicken|beef|pasta|cookie|bread|cake)/i.test(title))) {
-      const dutch = translateRecipeEnToNl(baseRecipe);
-      baseRecipe.titleEn = baseRecipe.title;
-      baseRecipe.descriptionEn = baseRecipe.description;
-      baseRecipe.ingredientSectionsEn = baseRecipe.ingredientSections;
-      baseRecipe.instructionsEn = baseRecipe.instructions;
+    // English recipes are queued for Gemini translation to Dutch (the English original is kept)
+    const isEnglish = lang === 'en' || (!lang && /^(apple|banana|pie|chicken|beef|pasta|cookie|bread|cake)/i.test(title));
+    recipes.push(isEnglish ? withPendingTranslation(baseRecipe) : baseRecipe);
 
-      baseRecipe.title = dutch.title || baseRecipe.title;
-      baseRecipe.description = dutch.description || baseRecipe.description;
-      baseRecipe.ingredientSections = dutch.ingredientSections || baseRecipe.ingredientSections;
-      baseRecipe.instructions = dutch.instructions || baseRecipe.instructions;
-    }
-
-    recipes.push(baseRecipe);
   }
 
   return recipes;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getStoredApiKey, saveStoredApiKey } from '../services/storageService';
 import { verifyGeminiKey, getGeminiStatus } from '../services/geminiService';
+import { startTranslationQueue } from '../services/translationService';
 import { Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
 import { Recipe } from '../types/recipe';
 import { parseCookmateXml } from '../services/cookmateImportService';
@@ -44,6 +45,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleSaveApiKey = (e: React.FormEvent) => {
     e.preventDefault();
     saveStoredApiKey(apiKey.trim());
+    startTranslationQueue(); // retry any recipes waiting for translation with the new key
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
   };
