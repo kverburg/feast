@@ -1,12 +1,11 @@
 import React from 'react';
-import { UtensilsCrossed, PlusCircle, ShoppingBag, Settings, Sun, Moon, Search, Sparkles, CalendarDays } from 'lucide-react';
+import { UtensilsCrossed, ShoppingBag, Settings, Sun, Moon, Search, Sparkles, CalendarDays } from 'lucide-react';
 
 interface NavbarProps {
   currentTab: 'recipes' | 'meals' | 'shopping' | 'settings';
   setCurrentTab: (tab: 'recipes' | 'meals' | 'shopping' | 'settings') => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  onOpenAddModal: () => void;
   onOpenImportModal: () => void;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
@@ -19,7 +18,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   setCurrentTab,
   searchQuery,
   setSearchQuery,
-  onOpenAddModal,
   onOpenImportModal,
   theme,
   toggleTheme,
@@ -61,11 +59,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button className="nav-desktop-only btn btn-outline btn-sm" onClick={onOpenImportModal}>
               <Sparkles size={16} />
-              <span>Import Recipe</span>
-            </button>
-            <button className="nav-desktop-only btn btn-primary btn-sm" onClick={onOpenAddModal}>
-              <PlusCircle size={16} />
-              <span>New Recipe</span>
+              <span>Import / Add</span>
             </button>
             <div className="lang-toggle-group">
               <button
@@ -104,22 +98,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         <button
-          className="mobile-nav-item highlight"
-          onClick={onOpenImportModal}
-        >
-          <Sparkles size={22} />
-          <span>Import</span>
-        </button>
-
-        <button
-          className="mobile-nav-item"
-          onClick={onOpenAddModal}
-        >
-          <PlusCircle size={22} />
-          <span>Add</span>
-        </button>
-
-        <button
           className={`mobile-nav-item ${currentTab === 'meals' ? 'active' : ''}`}
           onClick={() => setCurrentTab('meals')}
         >
@@ -133,6 +111,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <ShoppingBag size={20} />
           <span>Shopping</span>
+        </button>
+
+        <button
+          className="mobile-nav-item highlight"
+          onClick={onOpenImportModal}
+        >
+          <Sparkles size={22} />
+          <span>Import / Add</span>
         </button>
 
         <button

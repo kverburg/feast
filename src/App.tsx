@@ -176,10 +176,6 @@ export function App() {
         }}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
-        onOpenAddModal={() => {
-          setEditingRecipe(null);
-          setIsFormOpen(true);
-        }}
         onOpenImportModal={() => setIsImportOpen(true)}
         theme={theme}
         toggleTheme={toggleTheme}
@@ -263,6 +259,11 @@ export function App() {
       {isImportOpen && (
         <RecipeImportModal
           onImportComplete={handleImportComplete}
+          onManualAdd={() => {
+            setIsImportOpen(false);
+            setEditingRecipe(null);
+            setIsFormOpen(true);
+          }}
           onClose={() => setIsImportOpen(false)}
         />
       )}

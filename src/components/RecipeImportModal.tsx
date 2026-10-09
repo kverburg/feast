@@ -5,19 +5,21 @@ import { parseRecipeWithGemini } from '../services/geminiService';
 import { getStoredApiKey } from '../services/storageService';
 import { translateRecipeToDutch } from '../services/translationService';
 import { findImageForRecipe } from '../services/imageSearchService';
-import { Globe, Camera, Upload, Sparkles, X, Check, Loader2, FileText, Layers, Clipboard } from 'lucide-react';
+import { Globe, Camera, Upload, Sparkles, X, Check, Loader2, FileText, Layers, Clipboard, PenLine } from 'lucide-react';
 
 
 interface RecipeImportModalProps {
   onImportComplete: (recipe: Recipe) => void;
+  onManualAdd: () => void;
   onClose: () => void;
 }
 
 export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
   onImportComplete,
+  onManualAdd,
   onClose,
 }) => {
-  const [activeTab, setActiveTab] = useState<'url' | 'paste' | 'photo'>('url');
+  const [activeTab, setActiveTab] = useState<'url' | 'paste' | 'photo' | 'manual'>('url');
   const [urlInput, setUrlInput] = useState('');
   const [pasteInput, setPasteInput] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -176,7 +178,7 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
         <div className="modal-header">
           <div className="import-modal-title">
             <Sparkles size={22} color="var(--accent-primary)" />
-            <h2>Import Recipe</h2>
+            <h2>Import / Add Recipe</h2>
           </div>
           <button className="btn btn-secondary btn-icon" onClick={onClose}>
             <X size={20} />
@@ -209,7 +211,26 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
               <Camera size={18} />
               <span>Photo / OCR</span>
             </button>
+
+            <button
+              className={`import-tab ${activeTab === 'manual' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('manual'); setParsedResult(null); setErrorMsg(''); }}
+            >
+              <PenLine size={18} />
+              <span>Add manually</span>
+            </button>
           </div>
+
+          {/* Manual Tab Content */}
+          {activeTab === 'manual' && (
+            <div className="tab-content">
+              <p className="tab-hint">Type in a recipe yourself: title, ingredients and steps.</p>
+              <button className="btn btn-primary" onClick={onManualAdd}>
+                <PenLine size={18} />
+                <span>Start a blank recipe</span>
+              </button>
+            </div>
+          )}
 
           {/* URL Tab Content */}
           {activeTab === 'url' && !parsedResult && (
