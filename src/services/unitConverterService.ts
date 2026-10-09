@@ -225,6 +225,19 @@ export function convertCupToMetric(amount: number, unit: string, ingredientName:
 }
 
 // Clean raw ingredient line to produce 100% PURE METRIC ingredient structure
+// Remove (possibly nested) parentheticals and return what was inside them.
+function extractParentheticals(text: string): { text: string; inner: string[] } {
+  const inner: string[] = [];
+  let out = text;
+  while (/\([^()]*\)/.test(out)) {
+    out = out.replace(/\(([^()]*)\)/g, (_, content) => {
+      if (content.trim()) inner.unshift(content.trim());
+      return '';
+    });
+  }
+  return { text: out.replace(/[()]/g, '').replace(/\s+/g, ' ').trim(), inner };
+}
+
 export function parsePureMetricIngredient(rawLine: string): { amount: number; unit: string; name: string; notes?: string } {
   let line = convertFahrenheitToCelsiusInText(rawLine).trim();
 
@@ -263,6 +276,8 @@ export function parsePureMetricIngredient(rawLine: string): { amount: number; un
 
   // 2. Standard metric conversion if parenthetical metric was not present
   line = line.replace(/(\d+)\s+and\s+(\d+\/\d+)/gi, '$1 $2');
+  // Ranges like "1/2 to 3/4 cup" or "2-3 tbsp": keep the upper bound (safer for shopping)
+  line = line.replace(/^([-*•\s]*)\d[\d\/\. ]*?\s*(?:to|–|-)\s*(\d[\d\/\. ]*\s)/i, '$1$2');
   
   const regex = /^([\d\/\.\s-]+)?\s*(tablespoons?|tablespoon|tbsp|teaspoons?|teaspoon|tsp|cups?|cup|grams?|gram|g|kg|milliliters?|ml|liters?|l|ounces?|oz|pounds?|lbs?|lb|cloves?|clove|pinches|pinch|handfuls?|handful|slices?|slice|packets?|packet|cans?|can|pieces?|piece|pcs)?\s+(.+)$/i;
   const match = line.replace(/^[-*•\s]+/, '').match(regex);
@@ -292,13 +307,20 @@ export function parsePureMetricIngredient(rawLine: string): { amount: number; un
     unit = match[2] ? match[2].toLowerCase() : '';
     name = match[3] || line;
 
-    name = name.replace(/\([\s\S]*?\)/g, '').trim();
+    const stripped = extractParentheticals(name);
+    name = stripped.text;
+    if (stripped.inner.length > 0) notes = stripped.inner.join(', ');
 
     if (name.includes(',')) {
       const parts = name.split(',');
       name = parts[0].trim();
-      notes = parts.slice(1).join(',').trim();
-    }
+      const afterComma = parts.slice(1).join(',').trim();
+      notes = notes ? `${afterComma}, ${notes}` : afterComma;
+    }  } else {
+    // No leading amount (e.g. "Whipped cream (optional)"): still move parentheticals into notes
+    const stripped = extractParentheticals(name);
+    name = stripped.text;
+    if (stripped.inner.length > 0) notes = stripped.inner.join(', ');
   }
 
   // Convert cup/imperial to metric

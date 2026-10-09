@@ -353,3 +353,12 @@ export const getStoredVoiceEnabled = (): boolean => {
 export const saveStoredVoiceEnabled = (enabled: boolean): void => {
   localStorage.setItem(STORAGE_KEY_VOICE_ENABLED, enabled ? 'true' : 'false');
 };
+
+const STORAGE_KEY_LANGUAGE = 'gourmet_craft_language_v1';
+
+export const getStoredLanguage = (): 'nl' | 'en' =>
+  localStorage.getItem(STORAGE_KEY_LANGUAGE) === 'en' ? 'en' : 'nl';
+
+export const saveStoredLanguage = (language: 'nl' | 'en'): void => {
+  localStorage.setItem(STORAGE_KEY_LANGUAGE, language);
+};

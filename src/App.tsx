@@ -8,9 +8,12 @@ import {
   getStoredTheme,
   saveStoredTheme,
   getStoredVoiceEnabled,
+  getStoredLanguage,
+  saveStoredLanguage,
   saveStoredVoiceEnabled,
   INITIAL_RECIPES
 } from './services/storageService';
+import { Language } from './services/localizeRecipe';
 import { Navbar } from './components/Navbar';
 import { RecipeList } from './components/RecipeList';
 import { RecipeDetail } from './components/RecipeDetail';
@@ -20,12 +23,15 @@ import { CookModeModal } from './components/CookModeModal';
 import { ShoppingList } from './components/ShoppingList';
 import { SettingsModal } from './components/SettingsModal';
 import { Meals } from './components/Meals';
+import { startTranslationQueue, subscribeTranslationChange, subscribeTranslationError } from './services/translationService';
+import { ErrorBanner } from './components/ErrorBanner';
 import { Meal, getStoredMeals, saveStoredMeals } from './services/mealService';
 
 export function App() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
+  const [translationError, setTranslationError] = useState<string | null>(null);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [currentTab, setCurrentTab] = useState<'recipes' | 'meals' | 'shopping' | 'settings'>('recipes');
   const [searchQuery, setSearchQuery] = useState('');
@@ -38,6 +44,11 @@ export function App() {
 
   // Theme & Voice Settings State
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [language, setLanguageState] = useState<Language>(() => getStoredLanguage());
+  const setLanguage = (lang: Language) => {
+    setLanguageState(lang);
+    saveStoredLanguage(lang);
+  };
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(false);
 
   // Load stored data on initial mount
@@ -54,8 +65,18 @@ export function App() {
     setTheme(loadedTheme);
     document.documentElement.setAttribute('data-theme', loadedTheme);
 
+    // Background queue: translates recipes that are waiting for a Dutch version (needs a Gemini key)
+    const unsubscribeChange = subscribeTranslationChange(() => setRecipes(getStoredRecipes()));
+    const unsubscribeError = subscribeTranslationError(setTranslationError);
+    startTranslationQueue();
+
     const loadedVoice = getStoredVoiceEnabled();
     setVoiceEnabled(loadedVoice);
+
+    return () => {
+      unsubscribeChange();
+      unsubscribeError();
+    };
   }, []);
 
   const handleToggleVoice = (enabled: boolean) => {
@@ -121,6 +142,7 @@ export function App() {
     setRecipes(updated);
     saveStoredRecipes(updated);
     setIsImportOpen(false);
+    startTranslationQueue();
     setSelectedRecipe(importedRecipe);
     setCurrentTab('recipes');
   };
@@ -162,14 +184,23 @@ export function App() {
         }}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
-        onOpenAddModal={() => {
-          setEditingRecipe(null);
-          setIsFormOpen(true);
-        }}
         onOpenImportModal={() => setIsImportOpen(true)}
         theme={theme}
         toggleTheme={toggleTheme}
+        language={language}
+        setLanguage={setLanguage}
       />
+
+      {translationError && (
+        <ErrorBanner
+          message={translationError}
+          actionLabel="Open Settings"
+          onAction={() => {
+            setCurrentTab('settings');
+            setSelectedRecipe(null);
+          }}
+        />
+      )}
 
       {/* Main Content Body */}
       <main className="main-content">
@@ -177,6 +208,7 @@ export function App() {
           selectedRecipe ? (
             <RecipeDetail
               recipe={selectedRecipe}
+              language={language}
               onBack={() => setSelectedRecipe(null)}
               onEdit={(rec) => {
                 setEditingRecipe(rec);
@@ -190,6 +222,7 @@ export function App() {
           ) : (
             <RecipeList
               recipes={recipes}
+              language={language}
               searchQuery={searchQuery}
               onSelectRecipe={(rec) => setSelectedRecipe(rec)}
               onToggleFavorite={handleToggleFavorite}
@@ -220,6 +253,7 @@ export function App() {
             onImportBackup={(newRecipes) => {
               setRecipes(newRecipes);
               saveStoredRecipes(newRecipes);
+              startTranslationQueue(); // imported English recipes may be waiting for translation
             }}
             onResetSeed={handleResetSeed}
             theme={theme}
@@ -245,6 +279,11 @@ export function App() {
       {isImportOpen && (
         <RecipeImportModal
           onImportComplete={handleImportComplete}
+          onManualAdd={() => {
+            setIsImportOpen(false);
+            setEditingRecipe(null);
+            setIsFormOpen(true);
+          }}
           onClose={() => setIsImportOpen(false)}
         />
       )}

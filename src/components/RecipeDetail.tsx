@@ -1,3 +1,4 @@
+import { localizeRecipe, Language } from '../services/localizeRecipe';
 import React, { useState } from 'react';
 import { Recipe, IngredientItem } from '../types/recipe';
 import { convertCupToMetric } from '../services/unitConverterService';
@@ -5,6 +6,7 @@ import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft,
 
 interface RecipeDetailProps {
   recipe: Recipe;
+  language: Language;
   onBack: () => void;
   onEdit: (recipe: Recipe) => void;
   onDelete: (id: string) => void;
@@ -57,6 +59,7 @@ function convertUnit(amount: number, unit: string, system: 'metric' | 'imperial'
 
 export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   recipe,
+  language,
   onBack,
   onEdit,
   onDelete,
@@ -64,11 +67,6 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   onStartCookMode,
   onAddToShoppingList,
 }) => {
-  // Language toggle: 'nl' = Dutch (default), 'en' = original English
-  const [language, setLanguage] = useState<'nl' | 'en'>('nl');
-
-  const hasEnglish = !!(recipe.titleEn || recipe.instructionsEn);
-
   // Displayed fields based on selected language
   const displayTitle = language === 'en' && recipe.titleEn ? recipe.titleEn : recipe.title;
   const displayDescription = language === 'en' && recipe.descriptionEn ? recipe.descriptionEn : recipe.description;
@@ -171,6 +169,11 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         <div className="hero-content">
           <h1 className="hero-title">{displayTitle}</h1>
           <p className="hero-description">{displayDescription}</p>
+          {recipe.translationPending && language === 'nl' && (
+            <p className="hero-description" style={{ fontSize: '0.85rem', opacity: 0.7 }}>
+              Nederlandse vertaling volgt… (staat in de wachtrij)
+            </p>
+          )}
 
           <div className="hero-stats">
             <div className="stat-card">
@@ -199,7 +202,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           </div>
 
           <div className="hero-cta-bar">
-            <button className="btn btn-primary btn-cook-mode" onClick={() => onStartCookMode(recipe, currentServings)}>
+            <button className="btn btn-primary btn-cook-mode" onClick={() => onStartCookMode(localizeRecipe(recipe, language), currentServings)}>
               <Play size={20} fill="#ffffff" />
               <span>Start Cook Mode</span>
             </button>
@@ -211,24 +214,6 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
               </a>
             )}
 
-            {hasEnglish && (
-              <div className="lang-toggle-group">
-                <button
-                  className={`lang-btn ${language === 'nl' ? 'active' : ''}`}
-                  onClick={() => setLanguage('nl')}
-                  title="Toon in het Nederlands"
-                >
-                  🇳🇱 NL
-                </button>
-                <button
-                  className={`lang-btn ${language === 'en' ? 'active' : ''}`}
-                  onClick={() => setLanguage('en')}
-                  title="Show in English"
-                >
-                  🇬🇧 EN
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -701,33 +686,6 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         .timer-btn {
           color: var(--accent-primary);
           border-color: var(--accent-primary);
-        }
-        .lang-toggle-group {
-          display: flex;
-          gap: 0.25rem;
-          background: var(--bg-primary);
-          border: 1px solid var(--border-color);
-          padding: 0.25rem;
-          border-radius: var(--radius-md);
-          margin-left: auto;
-        }
-        .lang-btn {
-          padding: 0.35rem 0.75rem;
-          border-radius: var(--radius-sm);
-          border: none;
-          background: none;
-          color: var(--text-muted);
-          font-weight: 700;
-          font-size: 0.82rem;
-          cursor: pointer;
-          transition: all 0.15s ease;
-        }
-        .lang-btn.active {
-          background: var(--accent-primary);
-          color: #ffffff;
-        }
-        .lang-btn:hover:not(.active) {
-          background: var(--bg-card-hover);
         }
 
       `}</style>

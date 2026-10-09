@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { getStoredApiKey, saveStoredApiKey } from '../services/storageService';
-import { verifyGeminiKey } from '../services/geminiService';
+import { verifyGeminiKey, getGeminiStatus } from '../services/geminiService';
+import { startTranslationQueue } from '../services/translationService';
 import { Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
 import { Recipe } from '../types/recipe';
 import { parseCookmateXml } from '../services/cookmateImportService';
@@ -27,18 +28,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [apiKey, setApiKey] = useState(getStoredApiKey());
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [serverKey, setServerKey] = useState(false);
+
+  useEffect(() => {
+    getGeminiStatus().then((status) => setServerKey(status.server));
+  }, []);
   const [verifyResult, setVerifyResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const handleVerifyKey = async () => {
     setVerifying(true);
     setVerifyResult(null);
-    setVerifyResult(await verifyGeminiKey(apiKey.trim()));
+    setVerifyResult(await verifyGeminiKey(apiKey.trim() || undefined));
     setVerifying(false);
   };
 
   const handleSaveApiKey = (e: React.FormEvent) => {
     e.preventDefault();
     saveStoredApiKey(apiKey.trim());
+    startTranslationQueue(); // retry any recipes waiting for translation with the new key
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
   };
@@ -242,14 +249,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
 
-            <p className="setting-desc">The key is shared across your devices.</p>
+            <p className="setting-desc">
+              {serverKey
+                ? 'A shared key is configured on the server and used by default. A key entered here overrides it (and is shared across your devices).'
+                : 'The key is shared across your devices.'}
+            </p>
 
             <div className="key-actions">
               <button type="submit" className="btn btn-secondary btn-sm">
                 {savedSuccess ? <Check size={16} color="#10b981" /> : null}
                 <span>{savedSuccess ? 'API Key Saved!' : 'Save Key'}</span>
               </button>
-              <button type="button" className="btn btn-outline btn-sm" onClick={handleVerifyKey} disabled={verifying || !apiKey.trim()}>
+              <button type="button" className="btn btn-outline btn-sm" onClick={handleVerifyKey} disabled={verifying || (!apiKey.trim() && !serverKey)}>
                 <span>{verifying ? 'Checking...' : 'Verify key'}</span>
               </button>
               {verifyResult && (

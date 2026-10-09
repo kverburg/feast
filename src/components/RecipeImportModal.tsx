@@ -1,29 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Recipe } from '../types/recipe';
 import { parseUrlToRecipe, parsePhotoToRecipe, parseHtmlContentToRecipe, parseRawTextToRecipe } from '../services/recipeParserService';
-import { parseRecipeWithGemini } from '../services/geminiService';
-import { getStoredApiKey } from '../services/storageService';
-import { translateRecipeEnToNl } from '../services/translationService';
+import { parseRecipeWithGemini, isGeminiAvailable } from '../services/geminiService';
+import { withPendingTranslation } from '../services/translationService';
 import { findImageForRecipe } from '../services/imageSearchService';
-import { Globe, Camera, Upload, Sparkles, X, Check, Loader2, FileText, Layers, Clipboard } from 'lucide-react';
+import { Globe, Camera, Upload, Sparkles, X, Check, Loader2, FileText, Layers, Clipboard, PenLine } from 'lucide-react';
 
 
 interface RecipeImportModalProps {
   onImportComplete: (recipe: Recipe) => void;
+  onManualAdd: () => void;
   onClose: () => void;
 }
 
 export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
   onImportComplete,
+  onManualAdd,
   onClose,
 }) => {
-  const [activeTab, setActiveTab] = useState<'url' | 'paste' | 'photo'>('url');
+  const [activeTab, setActiveTab] = useState<'url' | 'paste' | 'photo' | 'manual'>('url');
   const [urlInput, setUrlInput] = useState('');
   const [pasteInput, setPasteInput] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [geminiAvailable, setGeminiAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    isGeminiAvailable().then(setGeminiAvailable);
+  }, []);
   const [progressStatus, setProgressStatus] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
@@ -93,7 +100,6 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
     setProgressStatus('Starting OCR Scanner...');
 
     try {
-      const apiKey = getStoredApiKey();
       let recipeData: Partial<Recipe>;
 
       const runLocalOcr = () =>
@@ -102,9 +108,9 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
           setProgressStatus(status);
         });
 
-      if (apiKey && imagePreview) {
+      if (imagePreview) {
         try {
-          recipeData = await parseRecipeWithGemini(imagePreview, apiKey, true);
+          recipeData = await parseRecipeWithGemini(imagePreview, true);
         } catch {
           setProgressStatus('Gemini unavailable, using local OCR...');
           recipeData = await runLocalOcr();
@@ -128,10 +134,10 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
   const handleSaveImported = async () => {
     if (!parsedResult) return;
 
-    // Translate English → Dutch
-    const dutch = translateRecipeEnToNl(parsedResult);
+    // The recipe is saved right away in English; the background queue translates it with Gemini.
+    setSaving(true);
     const chosenCategory = parsedResult.category || 'Main';
-    const chosenTitle = dutch.title || parsedResult.title || 'Geïmporteerd Recept';
+    const chosenTitle = parsedResult.title || 'Imported Recipe';
     const resolvedImage = await findImageForRecipe(
       chosenTitle,
       chosenCategory,
@@ -139,29 +145,24 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
       parsedResult.tags || []
     );
 
-    const finalRecipe: Recipe = {
+    const finalRecipe: Recipe = withPendingTranslation({
       id: `imported-${Date.now()}`,
-      // Dutch as default
       title: chosenTitle,
-      description: dutch.description || parsedResult.description || 'Geïmporteerd via Feast.',
+      description: parsedResult.description || '',
       category: chosenCategory,
       prepTime: parsedResult.prepTime || 15,
       cookTime: parsedResult.cookTime || 20,
       servings: parsedResult.servings || 4,
       image: resolvedImage,
       sourceUrl: parsedResult.sourceUrl || (activeTab === 'url' ? urlInput : undefined),
-      ingredientSections: dutch.ingredientSections || parsedResult.ingredientSections || [],
-      instructions: dutch.instructions || parsedResult.instructions || [],
+      ingredientSections: parsedResult.ingredientSections || [],
+      instructions: parsedResult.instructions || [],
       tags: parsedResult.tags || ['Imported'],
       isFavorite: false,
       createdAt: new Date().toISOString(),
-      // Original English preserved
-      titleEn: parsedResult.title || undefined,
-      descriptionEn: parsedResult.description || undefined,
-      ingredientSectionsEn: parsedResult.ingredientSections || undefined,
-      instructionsEn: parsedResult.instructions || undefined,
-    };
+    });
 
+    setSaving(false);
     onImportComplete(finalRecipe);
   };
 
@@ -172,7 +173,7 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
         <div className="modal-header">
           <div className="import-modal-title">
             <Sparkles size={22} color="var(--accent-primary)" />
-            <h2>Import Recipe</h2>
+            <h2>Import / Add Recipe</h2>
           </div>
           <button className="btn btn-secondary btn-icon" onClick={onClose}>
             <X size={20} />
@@ -205,7 +206,26 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
               <Camera size={18} />
               <span>Photo / OCR</span>
             </button>
+
+            <button
+              className={`import-tab ${activeTab === 'manual' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('manual'); setParsedResult(null); setErrorMsg(''); }}
+            >
+              <PenLine size={18} />
+              <span>Add manually</span>
+            </button>
           </div>
+
+          {/* Manual Tab Content */}
+          {activeTab === 'manual' && (
+            <div className="tab-content">
+              <p className="tab-hint">Type in a recipe yourself: title, ingredients and steps.</p>
+              <button className="btn btn-primary" onClick={onManualAdd}>
+                <PenLine size={18} />
+                <span>Start a blank recipe</span>
+              </button>
+            </div>
+          )}
 
           {/* URL Tab Content */}
           {activeTab === 'url' && !parsedResult && (
@@ -408,13 +428,22 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
                 </div>
               </div>
 
+              {geminiAvailable === false && (
+                <div className="error-box card">
+                  <p>
+                    Gemini API key missing: this recipe cannot be translated to Dutch, so it can't be saved yet.
+                    Add a key in Settings first.
+                  </p>
+                </div>
+              )}
+
               <div className="preview-actions">
                 <button className="btn btn-secondary" onClick={() => setParsedResult(null)}>
                   Re-parse
                 </button>
-                <button className="btn btn-primary" onClick={handleSaveImported}>
+                <button className="btn btn-primary" onClick={handleSaveImported} disabled={saving || geminiAvailable === false}>
                   <Check size={18} />
-                  <span>Save to My Recipes</span>
+                  <span>{saving ? 'Saving...' : 'Save to My Recipes'}</span>
                 </button>
               </div>
             </div>

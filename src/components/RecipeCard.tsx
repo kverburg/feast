@@ -1,18 +1,22 @@
 import React from 'react';
 import { Clock, Users, Heart, Layers } from 'lucide-react';
+import { localizeRecipe, Language } from '../services/localizeRecipe';
 import { Recipe } from '../types/recipe';
 
 interface RecipeCardProps {
   recipe: Recipe;
+  language: Language;
   onSelect: (recipe: Recipe) => void;
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
 }
 
 export const RecipeCard: React.FC<RecipeCardProps> = ({
-  recipe,
+  recipe: originalRecipe,
+  language,
   onSelect,
   onToggleFavorite,
 }) => {
+  const recipe = localizeRecipe(originalRecipe, language);
   const totalParts = recipe.ingredientSections ? recipe.ingredientSections.length : 1;
   const totalIngredientsCount = recipe.ingredientSections
     ? recipe.ingredientSections.reduce((acc, sec) => acc + sec.items.length, 0)
@@ -48,6 +52,9 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
 
       <div className="card-content">
         <h3 className="card-title">{recipe.title}</h3>
+        {recipe.translationPending && language === 'nl' && (
+          <span className="translation-pending">Nederlandse vertaling volgt…</span>
+        )}
         <p className="card-description">{recipe.description}</p>
 
         <div className="card-meta">
@@ -130,6 +137,12 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
           display: flex;
           flex-direction: column;
           flex: 1;
+        }
+        .translation-pending {
+          display: inline-block;
+          font-size: 0.72rem;
+          color: var(--text-muted);
+          margin-bottom: 0.35rem;
         }
         .card-title {
           font-size: 1.15rem;

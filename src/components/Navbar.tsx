@@ -1,15 +1,16 @@
 import React from 'react';
-import { UtensilsCrossed, PlusCircle, ShoppingBag, Settings, Sun, Moon, Search, Sparkles, CalendarDays } from 'lucide-react';
+import { UtensilsCrossed, ShoppingBag, Settings, Sun, Moon, Search, Plus, CalendarDays } from 'lucide-react';
 
 interface NavbarProps {
   currentTab: 'recipes' | 'meals' | 'shopping' | 'settings';
   setCurrentTab: (tab: 'recipes' | 'meals' | 'shopping' | 'settings') => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  onOpenAddModal: () => void;
   onOpenImportModal: () => void;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
+  language: 'nl' | 'en';
+  setLanguage: (language: 'nl' | 'en') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -17,10 +18,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   setCurrentTab,
   searchQuery,
   setSearchQuery,
-  onOpenAddModal,
   onOpenImportModal,
   theme,
   toggleTheme,
+  language,
+  setLanguage,
 }) => {
   return (
     <>
@@ -47,26 +49,38 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="nav-actions">
-            <button className={`btn btn-secondary btn-sm ${currentTab === 'meals' ? 'active' : ''}`} onClick={() => setCurrentTab('meals')} title="Meals">
+            <button className={`nav-desktop-only btn btn-secondary btn-sm ${currentTab === 'meals' ? 'active' : ''}`} onClick={() => setCurrentTab('meals')} title="Meals">
               <CalendarDays size={16} />
               <span>Meals</span>
             </button>
-            <button className={`btn btn-secondary btn-sm ${currentTab === 'shopping' ? 'active' : ''}`} onClick={() => setCurrentTab('shopping')} title="Shopping List">
+            <button className={`nav-desktop-only btn btn-secondary btn-sm ${currentTab === 'shopping' ? 'active' : ''}`} onClick={() => setCurrentTab('shopping')} title="Shopping List">
               <ShoppingBag size={16} />
               <span>Shopping</span>
             </button>
-            <button className="btn btn-outline btn-sm" onClick={onOpenImportModal}>
-              <Sparkles size={16} />
-              <span>Import Recipe</span>
+            <button className="nav-desktop-only btn btn-outline btn-sm" onClick={onOpenImportModal}>
+              <Plus size={16} />
+              <span>Import / Add</span>
             </button>
-            <button className="btn btn-primary btn-sm" onClick={onOpenAddModal}>
-              <PlusCircle size={16} />
-              <span>New Recipe</span>
-            </button>
+            <div className="lang-toggle-group">
+              <button
+                className={`lang-btn ${language === 'nl' ? 'active' : ''}`}
+                onClick={() => setLanguage('nl')}
+                title="Toon recepten in het Nederlands"
+              >
+                <span className="lang-flag">🇳🇱</span> NL
+              </button>
+              <button
+                className={`lang-btn ${language === 'en' ? 'active' : ''}`}
+                onClick={() => setLanguage('en')}
+                title="Show recipes in English"
+              >
+                <span className="lang-flag">🇬🇧</span> EN
+              </button>
+            </div>
             <button className="btn btn-secondary btn-icon" onClick={toggleTheme} title="Toggle Dark/Light Mode">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button className={`btn btn-secondary btn-icon ${currentTab === 'settings' ? 'active' : ''}`} onClick={() => setCurrentTab('settings')} title="Settings & Backup">
+            <button className={`nav-desktop-only btn btn-secondary btn-icon ${currentTab === 'settings' ? 'active' : ''}`} onClick={() => setCurrentTab('settings')} title="Settings & Backup">
               <Settings size={18} />
             </button>
           </div>
@@ -84,22 +98,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         <button
-          className="mobile-nav-item highlight"
-          onClick={onOpenImportModal}
-        >
-          <Sparkles size={22} />
-          <span>Import</span>
-        </button>
-
-        <button
-          className="mobile-nav-item"
-          onClick={onOpenAddModal}
-        >
-          <PlusCircle size={22} />
-          <span>Add</span>
-        </button>
-
-        <button
           className={`mobile-nav-item ${currentTab === 'meals' ? 'active' : ''}`}
           onClick={() => setCurrentTab('meals')}
         >
@@ -113,6 +111,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <ShoppingBag size={20} />
           <span>Shopping</span>
+        </button>
+
+        <button
+          className="mobile-nav-item"
+          onClick={onOpenImportModal}
+        >
+          <Plus size={20} />
+          <span>Import/Add</span>
         </button>
 
         <button
@@ -177,6 +183,33 @@ export const Navbar: React.FC<NavbarProps> = ({
           border-radius: var(--radius-full);
           letter-spacing: 0.05em;
         }
+        .lang-toggle-group {
+          display: flex;
+          gap: 0.25rem;
+          background: var(--bg-primary);
+          border: 1px solid var(--border-color);
+          padding: 0.25rem;
+          border-radius: var(--radius-md);
+        }
+        .lang-btn {
+          padding: 0.3rem 0.6rem;
+          border-radius: var(--radius-sm);
+          border: none;
+          background: none;
+          color: var(--text-muted);
+          font-weight: 700;
+          font-size: 0.8rem;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.15s ease;
+        }
+        .lang-btn.active {
+          background: var(--accent-primary);
+          color: #ffffff;
+        }
+        .lang-btn:hover:not(.active) {
+          background: var(--bg-card-hover);
+        }
         .search-box {
           position: relative;
           flex: 1;
@@ -217,6 +250,29 @@ export const Navbar: React.FC<NavbarProps> = ({
           .nav-actions .btn span {
             display: none;
           }
+          /* These actions live in the bottom bar on mobile; keeping them here made the header wider than the page */
+          .nav-desktop-only {
+            display: none;
+          }
+          .navbar-container {
+            padding: 0.85rem 1rem;
+            gap: 0.5rem;
+          }
+          .lang-flag {
+            display: none;
+          }
+          .lang-toggle-group {
+            flex-shrink: 0;
+          }
+          .search-input {
+            min-width: 0;
+            padding-right: 0.5rem;
+          }
+          .brand,
+          .search-box,
+          .nav-actions {
+            min-width: 0;
+          }
           .mobile-bottom-nav {
             display: flex;
             position: fixed;
@@ -242,24 +298,13 @@ export const Navbar: React.FC<NavbarProps> = ({
             color: var(--text-muted);
             font-size: 0.72rem;
             font-weight: 500;
+            white-space: nowrap;
             cursor: pointer;
             width: 16%;
             height: 100%;
           }
           .mobile-nav-item.active {
             color: var(--accent-primary);
-          }
-          .mobile-nav-item.highlight {
-            color: #ffffff;
-            background: var(--accent-gradient);
-            border-radius: var(--radius-full);
-            width: 48px;
-            height: 48px;
-            margin-bottom: 14px;
-            box-shadow: 0 4px 14px var(--accent-glow);
-          }
-          .mobile-nav-item.highlight span {
-            display: none;
           }
         }
       `}</style>
