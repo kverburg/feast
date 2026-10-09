@@ -10,6 +10,8 @@ interface NavbarProps {
   onOpenImportModal: () => void;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
+  language: 'nl' | 'en';
+  setLanguage: (language: 'nl' | 'en') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -21,6 +23,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenImportModal,
   theme,
   toggleTheme,
+  language,
+  setLanguage,
 }) => {
   return (
     <>
@@ -63,6 +67,22 @@ export const Navbar: React.FC<NavbarProps> = ({
               <PlusCircle size={16} />
               <span>New Recipe</span>
             </button>
+            <div className="lang-toggle-group">
+              <button
+                className={`lang-btn ${language === 'nl' ? 'active' : ''}`}
+                onClick={() => setLanguage('nl')}
+                title="Toon recepten in het Nederlands"
+              >
+                🇳🇱 NL
+              </button>
+              <button
+                className={`lang-btn ${language === 'en' ? 'active' : ''}`}
+                onClick={() => setLanguage('en')}
+                title="Show recipes in English"
+              >
+                🇬🇧 EN
+              </button>
+            </div>
             <button className="btn btn-secondary btn-icon" onClick={toggleTheme} title="Toggle Dark/Light Mode">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
@@ -176,6 +196,33 @@ export const Navbar: React.FC<NavbarProps> = ({
           padding: 0.15rem 0.45rem;
           border-radius: var(--radius-full);
           letter-spacing: 0.05em;
+        }
+        .lang-toggle-group {
+          display: flex;
+          gap: 0.25rem;
+          background: var(--bg-primary);
+          border: 1px solid var(--border-color);
+          padding: 0.25rem;
+          border-radius: var(--radius-md);
+        }
+        .lang-btn {
+          padding: 0.3rem 0.6rem;
+          border-radius: var(--radius-sm);
+          border: none;
+          background: none;
+          color: var(--text-muted);
+          font-weight: 700;
+          font-size: 0.8rem;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.15s ease;
+        }
+        .lang-btn.active {
+          background: var(--accent-primary);
+          color: #ffffff;
+        }
+        .lang-btn:hover:not(.active) {
+          background: var(--bg-card-hover);
         }
         .search-box {
           position: relative;

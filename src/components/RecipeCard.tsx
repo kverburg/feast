@@ -1,18 +1,22 @@
 import React from 'react';
 import { Clock, Users, Heart, Layers } from 'lucide-react';
+import { localizeRecipe, Language } from '../services/localizeRecipe';
 import { Recipe } from '../types/recipe';
 
 interface RecipeCardProps {
   recipe: Recipe;
+  language: Language;
   onSelect: (recipe: Recipe) => void;
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
 }
 
 export const RecipeCard: React.FC<RecipeCardProps> = ({
-  recipe,
+  recipe: originalRecipe,
+  language,
   onSelect,
   onToggleFavorite,
 }) => {
+  const recipe = localizeRecipe(originalRecipe, language);
   const totalParts = recipe.ingredientSections ? recipe.ingredientSections.length : 1;
   const totalIngredientsCount = recipe.ingredientSections
     ? recipe.ingredientSections.reduce((acc, sec) => acc + sec.items.length, 0)

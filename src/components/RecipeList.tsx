@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Recipe } from '../types/recipe';
 import { RecipeCard } from './RecipeCard';
+import { Language } from '../services/localizeRecipe';
 import { Sparkles, SlidersHorizontal, Heart, Utensils, RotateCcw } from 'lucide-react';
 
 interface RecipeListProps {
   recipes: Recipe[];
+  language: Language;
   searchQuery: string;
   onSelectRecipe: (recipe: Recipe) => void;
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
@@ -16,6 +18,7 @@ const CATEGORIES = ['All', 'Favorites', 'Main', 'Appetizer', 'Dessert', 'Baking'
 
 export const RecipeList: React.FC<RecipeListProps> = ({
   recipes,
+  language,
   searchQuery,
   onSelectRecipe,
   onToggleFavorite,
@@ -119,6 +122,7 @@ export const RecipeList: React.FC<RecipeListProps> = ({
             <RecipeCard
               key={recipe.id}
               recipe={recipe}
+              language={language}
               onSelect={onSelectRecipe}
               onToggleFavorite={onToggleFavorite}
             />

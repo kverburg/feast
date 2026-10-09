@@ -8,9 +8,12 @@ import {
   getStoredTheme,
   saveStoredTheme,
   getStoredVoiceEnabled,
+  getStoredLanguage,
+  saveStoredLanguage,
   saveStoredVoiceEnabled,
   INITIAL_RECIPES
 } from './services/storageService';
+import { Language } from './services/localizeRecipe';
 import { Navbar } from './components/Navbar';
 import { RecipeList } from './components/RecipeList';
 import { RecipeDetail } from './components/RecipeDetail';
@@ -39,6 +42,11 @@ export function App() {
 
   // Theme & Voice Settings State
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [language, setLanguageState] = useState<Language>(() => getStoredLanguage());
+  const setLanguage = (lang: Language) => {
+    setLanguageState(lang);
+    saveStoredLanguage(lang);
+  };
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(false);
 
   // Load stored data on initial mount
@@ -175,6 +183,8 @@ export function App() {
         onOpenImportModal={() => setIsImportOpen(true)}
         theme={theme}
         toggleTheme={toggleTheme}
+        language={language}
+        setLanguage={setLanguage}
       />
 
       {/* Main Content Body */}
@@ -183,6 +193,7 @@ export function App() {
           selectedRecipe ? (
             <RecipeDetail
               recipe={selectedRecipe}
+              language={language}
               onBack={() => setSelectedRecipe(null)}
               onEdit={(rec) => {
                 setEditingRecipe(rec);
@@ -196,6 +207,7 @@ export function App() {
           ) : (
             <RecipeList
               recipes={recipes}
+              language={language}
               searchQuery={searchQuery}
               onSelectRecipe={(rec) => setSelectedRecipe(rec)}
               onToggleFavorite={handleToggleFavorite}
