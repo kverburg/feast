@@ -26,6 +26,13 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
           alt={recipe.title}
           className="card-image"
           loading="lazy"
+          onError={(e) => {
+            const target = e.currentTarget;
+            if (!target.dataset.triedFallback) {
+              target.dataset.triedFallback = 'true';
+              target.src = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1000&q=80';
+            }
+          }}
         />
         <div className="card-overlay">
           <span className="badge category-badge">{recipe.category}</span>

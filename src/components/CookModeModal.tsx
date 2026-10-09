@@ -6,18 +6,26 @@ import { X, ChevronLeft, ChevronRight, Play, Pause, RotateCcw, Timer, Users, Lay
 interface CookModeModalProps {
   recipe: Recipe;
   initialServings: number;
+  voiceEnabled?: boolean;
   onClose: () => void;
 }
 
 export const CookModeModal: React.FC<CookModeModalProps> = ({
   recipe,
   initialServings,
+  voiceEnabled = false,
   onClose,
 }) => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [servings, setServings] = useState(initialServings || recipe.servings || 4);
   const [showIngredientsDrawer, setShowIngredientsDrawer] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<Record<number, boolean>>({});
+
+  // Language toggle
+  const [language, setLanguage] = useState<'nl' | 'en'>('nl');
+  const hasEnglish = !!(recipe.titleEn || recipe.instructionsEn);
+  const displaySections = language === 'en' && recipe.ingredientSectionsEn ? recipe.ingredientSectionsEn : recipe.ingredientSections;
+  const displaySteps = language === 'en' && recipe.instructionsEn ? recipe.instructionsEn : recipe.instructions;
 
   // Voice Assistant States
   const [isVoiceActive, setIsVoiceActive] = useState(false);
@@ -30,9 +38,10 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
   const [timerSecondsLeft, setTimerSecondsLeft] = useState<number | null>(null);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
 
-  const steps = recipe.instructions || [];
+  const steps = displaySteps || [];
   const currentStep = steps[currentStepIndex];
   const scaleRatio = servings / (recipe.servings || 1);
+
 
   // Toggle current step speech playback ON / OFF
   const toggleCurrentStepSpeech = () => {
@@ -178,25 +187,48 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
         </div>
 
         <div className="cook-mode-top-actions">
-          {/* Hands-free Voice Toggle Button */}
-          <button
-            className={`btn btn-sm voice-toggle-btn ${isVoiceActive ? 'active' : ''}`}
-            onClick={toggleVoiceAssistant}
-            title={isVoiceActive ? 'Voice Assistant Active (Click to Turn Off)' : 'Turn On Hands-free Voice Assistant'}
-          >
-            {isVoiceActive ? <Mic size={18} className="mic-pulse" /> : <MicOff size={18} />}
-            <span>{isVoiceActive ? 'Voice ON' : 'Voice OFF'}</span>
-          </button>
+          {voiceEnabled && (
+            <>
+              {/* Hands-free Voice Toggle Button */}
+              <button
+                className={`btn btn-sm voice-toggle-btn ${isVoiceActive ? 'active' : ''}`}
+                onClick={toggleVoiceAssistant}
+                title={isVoiceActive ? 'Voice Assistant Active (Click to Turn Off)' : 'Turn On Hands-free Voice Assistant'}
+              >
+                {isVoiceActive ? <Mic size={18} className="mic-pulse" /> : <MicOff size={18} />}
+                <span>{isVoiceActive ? 'Voice ON' : 'Voice OFF'}</span>
+              </button>
 
-          {/* Read Step / Stop Speaking Toggle */}
-          <button
-            className={`btn btn-secondary btn-sm ${isSpeaking ? 'speaking active' : ''}`}
-            onClick={toggleCurrentStepSpeech}
-            title={isSpeaking ? 'Stop Speaking' : 'Read Current Step Aloud'}
-          >
-            {isSpeaking ? <VolumeX size={18} color="#ef4444" /> : <Volume2 size={18} />}
-            <span>{isSpeaking ? 'Stop' : 'Read Step'}</span>
-          </button>
+              {/* Read Step / Stop Speaking Toggle */}
+              <button
+                className={`btn btn-secondary btn-sm ${isSpeaking ? 'speaking active' : ''}`}
+                onClick={toggleCurrentStepSpeech}
+                title={isSpeaking ? 'Stop Speaking' : 'Read Current Step Aloud'}
+              >
+                {isSpeaking ? <VolumeX size={18} color="#ef4444" /> : <Volume2 size={18} />}
+                <span>{isSpeaking ? 'Stop' : 'Read Step'}</span>
+              </button>
+            </>
+          )}
+
+          {hasEnglish && (
+            <div className="lang-toggle-group-cook">
+              <button
+                className={`lang-btn-cook ${language === 'nl' ? 'active' : ''}`}
+                onClick={() => setLanguage('nl')}
+                title="Toon in het Nederlands"
+              >
+                🇳🇱
+              </button>
+              <button
+                className={`lang-btn-cook ${language === 'en' ? 'active' : ''}`}
+                onClick={() => setLanguage('en')}
+                title="Show in English"
+              >
+                🇬🇧
+              </button>
+            </div>
+          )}
 
           {/* Servings Scaler */}
           <div className="cook-mode-scaler">
@@ -218,10 +250,11 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
             <X size={22} />
           </button>
         </div>
+
       </div>
 
       {/* Voice Assistant Live Status Bar */}
-      {isVoiceActive && (
+      {voiceEnabled && isVoiceActive && (
         <div className="voice-status-bar">
           <div className="voice-indicator">
             <span className="mic-wave"></span>
@@ -267,7 +300,7 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
             </div>
 
             <div className="drawer-sections">
-              {recipe.ingredientSections?.map((sec) => (
+              {displaySections?.map((sec) => (
                 <div key={sec.id} className="drawer-sec">
                   <h4 className="drawer-sec-title">{sec.title}</h4>
                   <ul className="drawer-ing-list">
@@ -286,6 +319,7 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
                 </div>
               ))}
             </div>
+
           </div>
         )}
 
@@ -297,14 +331,16 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
                 <span className="step-giant-number">Step {currentStep.stepNumber} of {steps.length}</span>
                 
                 <div className="step-actions-group">
-                  <button
-                    className={`btn btn-outline btn-sm speak-step-btn ${isSpeaking ? 'active' : ''}`}
-                    onClick={toggleCurrentStepSpeech}
-                    title={isSpeaking ? 'Stop Speaking' : 'Speak Step Aloud'}
-                  >
-                    {isSpeaking ? <VolumeX size={16} color="#ef4444" /> : <Volume2 size={16} />}
-                    <span>{isSpeaking ? 'Stop' : 'Speak'}</span>
-                  </button>
+                  {voiceEnabled && (
+                    <button
+                      className={`btn btn-outline btn-sm speak-step-btn ${isSpeaking ? 'active' : ''}`}
+                      onClick={toggleCurrentStepSpeech}
+                      title={isSpeaking ? 'Stop Speaking' : 'Speak Step Aloud'}
+                    >
+                      {isSpeaking ? <VolumeX size={16} color="#ef4444" /> : <Volume2 size={16} />}
+                      <span>{isSpeaking ? 'Stop' : 'Speak'}</span>
+                    </button>
+                  )}
 
                   <button
                     className={`step-check-btn ${completedSteps[currentStepIndex] ? 'done' : ''}`}
@@ -704,6 +740,33 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
         .dot.completed {
           background: #10b981;
         }
+        .lang-toggle-group-cook {
+          display: flex;
+          gap: 0.2rem;
+          background: #1a1e2b;
+          border: 1px solid #2e3548;
+          padding: 0.2rem;
+          border-radius: var(--radius-md);
+        }
+        .lang-btn-cook {
+          padding: 0.25rem 0.5rem;
+          border-radius: var(--radius-sm);
+          border: none;
+          background: none;
+          color: #9ca3af;
+          font-size: 1rem;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          line-height: 1;
+        }
+        .lang-btn-cook.active {
+          background: var(--accent-primary);
+          filter: brightness(1.2);
+        }
+        .lang-btn-cook:hover:not(.active) {
+          background: #282f42;
+        }
+
       `}</style>
     </div>
   );

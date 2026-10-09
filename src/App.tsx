@@ -7,6 +7,8 @@ import {
   saveStoredShoppingList,
   getStoredTheme,
   saveStoredTheme,
+  getStoredVoiceEnabled,
+  saveStoredVoiceEnabled,
   INITIAL_RECIPES
 } from './services/storageService';
 import { Navbar } from './components/Navbar';
@@ -34,8 +36,9 @@ export function App() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [cookModeState, setCookModeState] = useState<{ recipe: Recipe; servings: number } | null>(null);
 
-  // Theme State
+  // Theme & Voice Settings State
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(false);
 
   // Load stored data on initial mount
   useEffect(() => {
@@ -50,7 +53,15 @@ export function App() {
     const loadedTheme = getStoredTheme();
     setTheme(loadedTheme);
     document.documentElement.setAttribute('data-theme', loadedTheme);
+
+    const loadedVoice = getStoredVoiceEnabled();
+    setVoiceEnabled(loadedVoice);
   }, []);
+
+  const handleToggleVoice = (enabled: boolean) => {
+    setVoiceEnabled(enabled);
+    saveStoredVoiceEnabled(enabled);
+  };
 
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
@@ -213,6 +224,8 @@ export function App() {
             onResetSeed={handleResetSeed}
             theme={theme}
             toggleTheme={toggleTheme}
+            voiceEnabled={voiceEnabled}
+            onToggleVoice={handleToggleVoice}
           />
         )}
       </main>
@@ -240,6 +253,7 @@ export function App() {
         <CookModeModal
           recipe={cookModeState.recipe}
           initialServings={cookModeState.servings}
+          voiceEnabled={voiceEnabled}
           onClose={() => setCookModeState(null)}
         />
       )}

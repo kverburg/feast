@@ -36,6 +36,11 @@ export interface Recipe {
   isFavorite: boolean;
   createdAt: string;
   notes?: string;
+  // Bilingual support: original English content (only present when recipe was translated to Dutch)
+  titleEn?: string;
+  descriptionEn?: string;
+  ingredientSectionsEn?: IngredientSection[];
+  instructionsEn?: InstructionStep[];
 }
 
 export interface ShoppingItem {
