@@ -1,5 +1,5 @@
 import React from 'react';
-import { UtensilsCrossed, ShoppingBag, Settings, Sun, Moon, Search, Sparkles, CalendarDays } from 'lucide-react';
+import { UtensilsCrossed, ShoppingBag, Settings, Sun, Moon, Search, Plus, CalendarDays } from 'lucide-react';
 
 interface NavbarProps {
   currentTab: 'recipes' | 'meals' | 'shopping' | 'settings';
@@ -58,7 +58,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>Shopping</span>
             </button>
             <button className="nav-desktop-only btn btn-outline btn-sm" onClick={onOpenImportModal}>
-              <Sparkles size={16} />
+              <Plus size={16} />
               <span>Import / Add</span>
             </button>
             <div className="lang-toggle-group">
@@ -114,11 +114,11 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         <button
-          className="mobile-nav-item highlight"
+          className="mobile-nav-item"
           onClick={onOpenImportModal}
         >
-          <Sparkles size={22} />
-          <span>Import / Add</span>
+          <Plus size={20} />
+          <span>Import/Add</span>
         </button>
 
         <button
@@ -298,24 +298,13 @@ export const Navbar: React.FC<NavbarProps> = ({
             color: var(--text-muted);
             font-size: 0.72rem;
             font-weight: 500;
+            white-space: nowrap;
             cursor: pointer;
             width: 16%;
             height: 100%;
           }
           .mobile-nav-item.active {
             color: var(--accent-primary);
-          }
-          .mobile-nav-item.highlight {
-            color: #ffffff;
-            background: var(--accent-gradient);
-            border-radius: var(--radius-full);
-            width: 48px;
-            height: 48px;
-            margin-bottom: 14px;
-            box-shadow: 0 4px 14px var(--accent-glow);
-          }
-          .mobile-nav-item.highlight span {
-            display: none;
           }
         }
       `}</style>
