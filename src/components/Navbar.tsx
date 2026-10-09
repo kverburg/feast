@@ -73,14 +73,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => setLanguage('nl')}
                 title="Toon recepten in het Nederlands"
               >
-                🇳🇱 NL
+                <span className="lang-flag">🇳🇱</span> NL
               </button>
               <button
                 className={`lang-btn ${language === 'en' ? 'active' : ''}`}
                 onClick={() => setLanguage('en')}
                 title="Show recipes in English"
               >
-                🇬🇧 EN
+                <span className="lang-flag">🇬🇧</span> EN
               </button>
             </div>
             <button className="btn btn-secondary btn-icon" onClick={toggleTheme} title="Toggle Dark/Light Mode">
@@ -269,8 +269,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             display: none;
           }
           .navbar-container {
-            padding: 0.85rem 1.5rem;
-            gap: 0.75rem;
+            padding: 0.85rem 1rem;
+            gap: 0.5rem;
+          }
+          .lang-flag {
+            display: none;
+          }
+          .lang-toggle-group {
+            flex-shrink: 0;
+          }
+          .search-input {
+            min-width: 0;
+            padding-right: 0.5rem;
           }
           .brand,
           .search-box,
