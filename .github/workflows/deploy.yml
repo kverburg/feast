@@ -78,10 +78,18 @@ jobs:
       - name: Upload preview version
         id: upload
         run: |
+          ALIAS="pr-${{ github.event.number }}"
           npx --yes wrangler@4 versions upload -c wrangler.preview.toml \
-            --preview-alias "pr-${{ github.event.number }}" \
-            --message "PR #${{ github.event.number }}" | tee upload.log
-          URL=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' upload.log | head -1)
+            --preview-alias "$ALIAS" \
+            --message "PR #${{ github.event.number }}" 2>&1 | tee upload.log
+          URL=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' upload.log | head -1 || true)
+          if [ -z "$URL" ]; then
+            # wrangler printed no URL: build it from the account's workers.dev subdomain
+            SUB=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+              | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).result?.subdomain || ""')
+            [ -n "$SUB" ] && URL="https://$ALIAS-feast.$SUB.workers.dev"
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
