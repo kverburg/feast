@@ -1,5 +1,5 @@
 import { Recipe, IngredientSection, InstructionStep, IngredientItem } from '../types/recipe';
-import { translateRecipeWithGemini, isGeminiAvailable, GeminiUnavailableError, classifyGeminiError } from './geminiService';
+import { translateRecipeWithGemini, isGeminiAvailable, classifyGeminiError } from './geminiService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
 
 // ---------------------------------------------------------------------------
@@ -271,26 +271,6 @@ export function translateRecipeEnToNl(recipeEn: Partial<Recipe>): DutchTranslati
   }));
 
   return { title, description, ingredientSections, instructions };
-}
-
-/**
- * Translate to Dutch with Gemini when a key is available (saved in Settings or on the server); otherwise (or if the call fails)
- * fall back to the keyword translator. `llm` tells the caller which one produced the result.
- */
-export async function translateRecipeToDutch(
-  recipeEn: Partial<Recipe>
-): Promise<DutchTranslation & { llm: boolean; error?: string }> {
-  let error: string | undefined;
-  try {
-    return { ...(await translateRecipeWithGemini(recipeEn)), llm: true };
-  } catch (e) {
-    // No key anywhere is not an error: just use the basic translator quietly.
-    if (!(e instanceof GeminiUnavailableError)) {
-      console.error('Gemini translation failed, using keyword translator', e);
-      error = e instanceof Error ? e.message : String(e);
-    }
-  }
-  return { ...translateRecipeEnToNl(recipeEn), llm: false, error };
 }
 
 const englishSource = (r: Recipe): Partial<Recipe> => ({

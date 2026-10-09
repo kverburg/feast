@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Recipe } from '../types/recipe';
 import { parseUrlToRecipe, parsePhotoToRecipe, parseHtmlContentToRecipe, parseRawTextToRecipe } from '../services/recipeParserService';
 import { parseRecipeWithGemini, isGeminiAvailable } from '../services/geminiService';
-import { translateRecipeToDutch } from '../services/translationService';
+import { translateRecipeEnToNl } from '../services/translationService';
 import { findImageForRecipe } from '../services/imageSearchService';
 import { Globe, Camera, Upload, Sparkles, X, Check, Loader2, FileText, Layers, Clipboard, PenLine } from 'lucide-react';
 
@@ -134,15 +134,15 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
   const handleSaveImported = async () => {
     if (!parsedResult) return;
 
-    // Translate English → Dutch (Gemini when a key is saved, keyword fallback otherwise)
+    // With Gemini available the recipe is saved right away in English and the background queue
+    // translates it. Without it, the instant keyword translation is used.
     setSaving(true);
-    const dutch = await translateRecipeToDutch(parsedResult);
-    // If Gemini failed (rate limit, offline, ...) the recipe is saved in English and queued for translation.
-    const queued = !!dutch.error;
+    const queued = geminiAvailable === true;
+    const dutch = queued ? null : translateRecipeEnToNl(parsedResult);
     const chosenCategory = parsedResult.category || 'Main';
     const chosenTitle = queued
       ? parsedResult.title || 'Imported Recipe'
-      : dutch.title || parsedResult.title || 'Geïmporteerd Recept';
+      : dutch?.title || parsedResult.title || 'Geïmporteerd Recept';
     const resolvedImage = await findImageForRecipe(
       chosenTitle,
       chosenCategory,
@@ -156,15 +156,15 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
       title: chosenTitle,
       description: queued
         ? parsedResult.description || ''
-        : dutch.description || parsedResult.description || 'Geïmporteerd via Feast.',
+        : dutch?.description || parsedResult.description || 'Geïmporteerd via Feast.',
       category: chosenCategory,
       prepTime: parsedResult.prepTime || 15,
       cookTime: parsedResult.cookTime || 20,
       servings: parsedResult.servings || 4,
       image: resolvedImage,
       sourceUrl: parsedResult.sourceUrl || (activeTab === 'url' ? urlInput : undefined),
-      ingredientSections: (queued ? undefined : dutch.ingredientSections) || parsedResult.ingredientSections || [],
-      instructions: (queued ? undefined : dutch.instructions) || parsedResult.instructions || [],
+      ingredientSections: dutch?.ingredientSections || parsedResult.ingredientSections || [],
+      instructions: dutch?.instructions || parsedResult.instructions || [],
       tags: parsedResult.tags || ['Imported'],
       isFavorite: false,
       createdAt: new Date().toISOString(),
@@ -173,7 +173,6 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
       descriptionEn: parsedResult.description || undefined,
       ingredientSectionsEn: parsedResult.ingredientSections || undefined,
       instructionsEn: parsedResult.instructions || undefined,
-      translationVersion: dutch.llm ? 2 : undefined,
       translationPending: queued || undefined,
     };
 
@@ -456,7 +455,7 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
                 </button>
                 <button className="btn btn-primary" onClick={handleSaveImported} disabled={saving}>
                   <Check size={18} />
-                  <span>{saving ? 'Translating & saving...' : 'Save to My Recipes'}</span>
+                  <span>{saving ? 'Saving...' : 'Save to My Recipes'}</span>
                 </button>
               </div>
             </div>
