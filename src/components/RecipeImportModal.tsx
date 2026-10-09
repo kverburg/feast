@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Recipe } from '../types/recipe';
 import { parseUrlToRecipe, parsePhotoToRecipe, parseHtmlContentToRecipe, parseRawTextToRecipe } from '../services/recipeParserService';
-import { parseRecipeWithGemini } from '../services/geminiService';
-import { getStoredApiKey } from '../services/storageService';
+import { parseRecipeWithGemini, isGeminiAvailable } from '../services/geminiService';
 import { translateRecipeToDutch } from '../services/translationService';
 import { findImageForRecipe } from '../services/imageSearchService';
 import { Globe, Camera, Upload, Sparkles, X, Check, Loader2, FileText, Layers, Clipboard, PenLine } from 'lucide-react';
@@ -27,6 +26,11 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [geminiAvailable, setGeminiAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    isGeminiAvailable().then(setGeminiAvailable);
+  }, []);
   const [progressStatus, setProgressStatus] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
@@ -96,7 +100,6 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
     setProgressStatus('Starting OCR Scanner...');
 
     try {
-      const apiKey = getStoredApiKey();
       let recipeData: Partial<Recipe>;
 
       const runLocalOcr = () =>
@@ -105,9 +108,9 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
           setProgressStatus(status);
         });
 
-      if (apiKey && imagePreview) {
+      if (imagePreview) {
         try {
-          recipeData = await parseRecipeWithGemini(imagePreview, apiKey, true);
+          recipeData = await parseRecipeWithGemini(imagePreview, true);
         } catch {
           setProgressStatus('Gemini unavailable, using local OCR...');
           recipeData = await runLocalOcr();
@@ -437,9 +440,9 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
                 </div>
               </div>
 
-              {!getStoredApiKey() && (
+              {geminiAvailable === false && (
                 <p className="tab-hint">
-                  No Gemini key saved: ingredients and steps will only get a basic word-by-word Dutch translation.
+                  No Gemini key available: ingredients and steps will only get a basic word-by-word Dutch translation.
                   Add a key in Settings for a full translation.
                 </p>
               )}

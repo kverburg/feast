@@ -1,34 +1,90 @@
 import { Recipe, IngredientSection, InstructionStep } from '../types/recipe';
 import { parseRawTextToRecipe } from './recipeParserService';
 
-// Cheap check that a key is accepted by Google: listing models uses no quota.
-export async function verifyGeminiKey(apiKey: string): Promise<{ ok: boolean; message: string }> {
-  if (!apiKey) return { ok: false, message: 'Enter a key first.' };
-  try {
-    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', {
-      headers: { 'x-goog-api-key': apiKey },
+import { getStoredApiKey } from './storageService';
+
+// Thrown when there is no key to use: none saved in Settings and none configured on the server.
+export class GeminiUnavailableError extends Error {}
+
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const GEMINI_MODEL = 'gemini-flash-latest';
+
+// A key saved in Settings is used directly; otherwise requests go through the worker's
+// /api/gemini proxy, which holds the shared key as a Cloudflare secret.
+async function geminiGenerate(body: unknown): Promise<any> {
+  const key = getStoredApiKey();
+  let res: Response;
+  if (key) {
+    res = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify(body),
     });
+  } else {
+    try {
+      res = await fetch('/api/gemini/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new GeminiUnavailableError('No Gemini key available.');
+    }
+    const isJson = res.headers.get('content-type')?.includes('application/json');
+    const notConfigured = res.status === 503 && (await res.clone().json().catch(() => null))?.error === 'not_configured';
+    // 403/non-JSON: no worker behind this page (local dev) or not logged in through Access.
+    if (!isJson || res.status === 403 || notConfigured) throw new GeminiUnavailableError('No Gemini key available.');
+  }
+  if (!res.ok) throw new Error(`Gemini API returned status ${res.status}`);
+  return res.json();
+}
+
+// Is the shared server key configured? (false in local dev, where there is no worker)
+async function serverKeyConfigured(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/gemini/status', { cache: 'no-store' });
+    if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return false;
+    return !!(await res.json()).configured;
+  } catch {
+    return false;
+  }
+}
+
+export async function getGeminiStatus(): Promise<{ custom: boolean; server: boolean }> {
+  return { custom: !!getStoredApiKey(), server: await serverKeyConfigured() };
+}
+
+export async function isGeminiAvailable(): Promise<boolean> {
+  const status = await getGeminiStatus();
+  return status.custom || status.server;
+}
+
+// Cheap check that a key is accepted by Google: listing models uses no quota.
+// With a typed key it checks that key; without one it checks the shared server key.
+export async function verifyGeminiKey(apiKey?: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    if (!apiKey) {
+      const res = await fetch('/api/gemini/verify', { cache: 'no-store' });
+      const isJson = res.headers.get('content-type')?.includes('application/json');
+      if (!isJson || res.status === 403) return { ok: false, message: 'No shared key available here. Enter a key first.' };
+      const body = await res.json();
+      if (body.error === 'not_configured') return { ok: false, message: 'No shared key is configured on the server. Enter a key first.' };
+      return { ok: !!body.ok, message: body.message || 'Unknown result.' };
+    }
+    const res = await fetch(`${GEMINI_BASE}/models?pageSize=1`, { headers: { 'x-goog-api-key': apiKey } });
     if (res.ok) return { ok: true, message: 'Key works.' };
     const body = await res.json().catch(() => null);
     return { ok: false, message: body?.error?.message || `Google rejected the key (HTTP ${res.status}).` };
   } catch {
-    return { ok: false, message: 'Could not reach Google. Check your connection.' };
+    return { ok: false, message: 'Could not reach the server or Google. Check your connection.' };
   }
 }
 
 export async function parseRecipeWithGemini(
   promptTextOrBase64Image: string,
-  apiKey?: string,
   isImage: boolean = false
 ): Promise<Partial<Recipe>> {
-  if (!apiKey) {
-    // If no custom API key provided, fall back to local intelligent OCR parser service
-    return parseRawTextToRecipe(promptTextOrBase64Image);
-  }
-
   try {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent`;
-
     const promptInstructions = `
 Analyze this recipe content and respond ONLY with a JSON object matching this schema:
 {
@@ -73,17 +129,7 @@ Analyze this recipe content and respond ONLY with a JSON object matching this sc
       }
     ];
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ contents })
-    });
-
-    if (!res.ok) {
-      throw new Error(`Gemini API returned status ${res.status}`);
-    }
-
-    const data = await res.json();
+    const data = await geminiGenerate({ contents });
     const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
@@ -111,8 +157,7 @@ export interface GeminiDutchRecipe {
 // Translate a whole recipe to natural Dutch in one call. Structure, amounts and timers come from
 // the original; only wording (and unit labels such as cloves -> teentjes) is taken from the model.
 export async function translateRecipeWithGemini(
-  recipe: Partial<Recipe>,
-  apiKey: string
+  recipe: Partial<Recipe>
 ): Promise<GeminiDutchRecipe> {
   const source = {
     title: recipe.title || '',
@@ -135,17 +180,10 @@ Rules:
 Recipe JSON:
 ${JSON.stringify(source)}`;
 
-  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
-    }),
+  const data = await geminiGenerate({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
   });
-  if (!res.ok) throw new Error(`Gemini API returned status ${res.status}`);
-
-  const data = await res.json();
   const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const out = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
 

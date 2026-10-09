@@ -1,6 +1,6 @@
 import { Recipe, IngredientSection, InstructionStep, IngredientItem } from '../types/recipe';
-import { translateRecipeWithGemini } from './geminiService';
-import { getStoredApiKey, getStoredRecipes, saveStoredRecipes } from './storageService';
+import { translateRecipeWithGemini, isGeminiAvailable, GeminiUnavailableError } from './geminiService';
+import { getStoredRecipes, saveStoredRecipes } from './storageService';
 
 // ---------------------------------------------------------------------------
 // Dictionaries
@@ -274,18 +274,18 @@ export function translateRecipeEnToNl(recipeEn: Partial<Recipe>): DutchTranslati
 }
 
 /**
- * Translate to Dutch with Gemini when a key is saved; otherwise (or if the call fails)
+ * Translate to Dutch with Gemini when a key is available (saved in Settings or on the server); otherwise (or if the call fails)
  * fall back to the keyword translator. `llm` tells the caller which one produced the result.
  */
 export async function translateRecipeToDutch(
   recipeEn: Partial<Recipe>
 ): Promise<DutchTranslation & { llm: boolean; error?: string }> {
-  const apiKey = getStoredApiKey();
   let error: string | undefined;
-  if (apiKey) {
-    try {
-      return { ...(await translateRecipeWithGemini(recipeEn, apiKey)), llm: true };
-    } catch (e) {
+  try {
+    return { ...(await translateRecipeWithGemini(recipeEn)), llm: true };
+  } catch (e) {
+    // No key anywhere is not an error: just use the basic translator quietly.
+    if (!(e instanceof GeminiUnavailableError)) {
       console.error('Gemini translation failed, using keyword translator', e);
       error = e instanceof Error ? e.message : String(e);
     }
@@ -327,7 +327,7 @@ export function upgradeKeywordTranslations(): Promise<boolean> {
 }
 
 async function runUpgrade(): Promise<boolean> {
-  if (!getStoredApiKey()) return false;
+  if (!(await isGeminiAvailable())) return false;
   const candidates = getStoredRecipes().filter(
     (r) => !r.id.startsWith('seed-') && r.translationVersion !== 2 && isUntouchedKeywordTranslation(r)
   );
