@@ -17,13 +17,13 @@ import { RecipeImportModal } from './components/RecipeImportModal';
 import { CookModeModal } from './components/CookModeModal';
 import { ShoppingList } from './components/ShoppingList';
 import { SettingsModal } from './components/SettingsModal';
-import { MealPlanner } from './components/MealPlanner';
-import { MealPlanEntry, getStoredMealPlan, saveStoredMealPlan } from './services/mealPlanService';
+import { Meals } from './components/Meals';
+import { Meal, getStoredMeals, saveStoredMeals } from './services/mealService';
 
 export function App() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
-  const [mealPlan, setMealPlan] = useState<MealPlanEntry[]>([]);
+  const [meals, setMeals] = useState<Meal[]>([]);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [currentTab, setCurrentTab] = useState<'recipes' | 'meals' | 'shopping' | 'settings'>('recipes');
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,7 +45,7 @@ export function App() {
     const loadedShopping = getStoredShoppingList();
     setShoppingList(loadedShopping);
 
-    setMealPlan(getStoredMealPlan());
+    setMeals(getStoredMeals());
 
     const loadedTheme = getStoredTheme();
     setTheme(loadedTheme);
@@ -127,10 +127,10 @@ export function App() {
     alert(`Added ${newItems.length} ingredients to your Shopping List!`);
   };
 
-  // Meal Plan Handler
-  const handleUpdateMealPlan = (entries: MealPlanEntry[]) => {
-    setMealPlan(entries);
-    saveStoredMealPlan(entries);
+  // Meals Handler
+  const handleUpdateMeals = (updated: Meal[]) => {
+    setMeals(updated);
+    saveStoredMeals(updated);
   };
 
   // Reset Seed Recipes
@@ -188,10 +188,10 @@ export function App() {
         )}
 
         {currentTab === 'meals' && (
-          <MealPlanner
+          <Meals
             recipes={recipes}
-            entries={mealPlan}
-            onUpdateEntries={handleUpdateMealPlan}
+            meals={meals}
+            onUpdateMeals={handleUpdateMeals}
             onAddToShoppingList={handleAddItemsToShoppingList}
           />
         )}

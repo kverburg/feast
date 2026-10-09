@@ -47,7 +47,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="nav-actions">
-            <button className={`btn btn-secondary btn-sm ${currentTab === 'meals' ? 'active' : ''}`} onClick={() => setCurrentTab('meals')} title="Meal Planner">
+            <button className={`btn btn-secondary btn-sm ${currentTab === 'meals' ? 'active' : ''}`} onClick={() => setCurrentTab('meals')} title="Meals">
               <CalendarDays size={16} />
               <span>Meals</span>
             </button>

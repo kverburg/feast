@@ -6,7 +6,7 @@
 const SYNCED_KEYS: Record<string, string> = {
   gourmet_craft_recipes_v1: 'recipes',
   gourmet_craft_shopping_v1: 'shopping',
-  gourmet_craft_mealplan_v1: 'mealplan',
+  gourmet_craft_meals_v1: 'meals',
 };
 
 type SyncData = Record<string, unknown>;
