@@ -51,19 +51,19 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="nav-actions">
-            <button className={`btn btn-secondary btn-sm ${currentTab === 'meals' ? 'active' : ''}`} onClick={() => setCurrentTab('meals')} title="Meals">
+            <button className={`nav-desktop-only btn btn-secondary btn-sm ${currentTab === 'meals' ? 'active' : ''}`} onClick={() => setCurrentTab('meals')} title="Meals">
               <CalendarDays size={16} />
               <span>Meals</span>
             </button>
-            <button className={`btn btn-secondary btn-sm ${currentTab === 'shopping' ? 'active' : ''}`} onClick={() => setCurrentTab('shopping')} title="Shopping List">
+            <button className={`nav-desktop-only btn btn-secondary btn-sm ${currentTab === 'shopping' ? 'active' : ''}`} onClick={() => setCurrentTab('shopping')} title="Shopping List">
               <ShoppingBag size={16} />
               <span>Shopping</span>
             </button>
-            <button className="btn btn-outline btn-sm" onClick={onOpenImportModal}>
+            <button className="nav-desktop-only btn btn-outline btn-sm" onClick={onOpenImportModal}>
               <Sparkles size={16} />
               <span>Import Recipe</span>
             </button>
-            <button className="btn btn-primary btn-sm" onClick={onOpenAddModal}>
+            <button className="nav-desktop-only btn btn-primary btn-sm" onClick={onOpenAddModal}>
               <PlusCircle size={16} />
               <span>New Recipe</span>
             </button>
@@ -86,7 +86,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button className="btn btn-secondary btn-icon" onClick={toggleTheme} title="Toggle Dark/Light Mode">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button className={`btn btn-secondary btn-icon ${currentTab === 'settings' ? 'active' : ''}`} onClick={() => setCurrentTab('settings')} title="Settings & Backup">
+            <button className={`nav-desktop-only btn btn-secondary btn-icon ${currentTab === 'settings' ? 'active' : ''}`} onClick={() => setCurrentTab('settings')} title="Settings & Backup">
               <Settings size={18} />
             </button>
           </div>
@@ -263,6 +263,19 @@ export const Navbar: React.FC<NavbarProps> = ({
         @media (max-width: 767px) {
           .nav-actions .btn span {
             display: none;
+          }
+          /* These actions live in the bottom bar on mobile; keeping them here made the header wider than the page */
+          .nav-desktop-only {
+            display: none;
+          }
+          .navbar-container {
+            padding: 0.85rem 1.5rem;
+            gap: 0.75rem;
+          }
+          .brand,
+          .search-box,
+          .nav-actions {
+            min-width: 0;
           }
           .mobile-bottom-nav {
             display: flex;
