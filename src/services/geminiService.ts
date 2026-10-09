@@ -1,6 +1,21 @@
 import { Recipe } from '../types/recipe';
 import { parseRawTextToRecipe } from './recipeParserService';
 
+// Cheap check that a key is accepted by Google: listing models uses no quota.
+export async function verifyGeminiKey(apiKey: string): Promise<{ ok: boolean; message: string }> {
+  if (!apiKey) return { ok: false, message: 'Enter a key first.' };
+  try {
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', {
+      headers: { 'x-goog-api-key': apiKey },
+    });
+    if (res.ok) return { ok: true, message: 'Key works.' };
+    const body = await res.json().catch(() => null);
+    return { ok: false, message: body?.error?.message || `Google rejected the key (HTTP ${res.status}).` };
+  } catch {
+    return { ok: false, message: 'Could not reach Google. Check your connection.' };
+  }
+}
+
 export async function parseRecipeWithGemini(
   promptTextOrBase64Image: string,
   apiKey?: string,
