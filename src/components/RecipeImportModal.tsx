@@ -3,7 +3,10 @@ import { Recipe } from '../types/recipe';
 import { parseUrlToRecipe, parsePhotoToRecipe, parseHtmlContentToRecipe, parseRawTextToRecipe } from '../services/recipeParserService';
 import { parseRecipeWithGemini } from '../services/geminiService';
 import { getStoredApiKey } from '../services/storageService';
+import { translateRecipeEnToNl } from '../services/translationService';
+import { findImageForRecipe } from '../services/imageSearchService';
 import { Globe, Camera, Upload, Sparkles, X, Check, Loader2, FileText, Layers, Clipboard } from 'lucide-react';
+
 
 interface RecipeImportModalProps {
   onImportComplete: (recipe: Recipe) => void;
@@ -119,28 +122,46 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
     }
   };
 
-  const handleSaveImported = () => {
+  const handleSaveImported = async () => {
     if (!parsedResult) return;
+
+    // Translate English → Dutch
+    const dutch = translateRecipeEnToNl(parsedResult);
+    const chosenCategory = parsedResult.category || 'Main';
+    const chosenTitle = dutch.title || parsedResult.title || 'Geïmporteerd Recept';
+    const resolvedImage = await findImageForRecipe(
+      chosenTitle,
+      chosenCategory,
+      parsedResult.image,
+      parsedResult.tags || []
+    );
 
     const finalRecipe: Recipe = {
       id: `imported-${Date.now()}`,
-      title: parsedResult.title || 'Imported Recipe',
-      description: parsedResult.description || 'Imported using GourmetCraft Parser.',
-      category: parsedResult.category || 'Main',
+      // Dutch as default
+      title: chosenTitle,
+      description: dutch.description || parsedResult.description || 'Geïmporteerd via Feast.',
+      category: chosenCategory,
       prepTime: parsedResult.prepTime || 15,
       cookTime: parsedResult.cookTime || 20,
       servings: parsedResult.servings || 4,
-      image: parsedResult.image || 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1000&q=80',
+      image: resolvedImage,
       sourceUrl: parsedResult.sourceUrl || (activeTab === 'url' ? urlInput : undefined),
-      ingredientSections: parsedResult.ingredientSections || [],
-      instructions: parsedResult.instructions || [],
+      ingredientSections: dutch.ingredientSections || parsedResult.ingredientSections || [],
+      instructions: dutch.instructions || parsedResult.instructions || [],
       tags: parsedResult.tags || ['Imported'],
       isFavorite: false,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      // Original English preserved
+      titleEn: parsedResult.title || undefined,
+      descriptionEn: parsedResult.description || undefined,
+      ingredientSectionsEn: parsedResult.ingredientSections || undefined,
+      instructionsEn: parsedResult.instructions || undefined,
     };
 
     onImportComplete(finalRecipe);
   };
+
 
   return (
     <div className="modal-overlay">
@@ -316,19 +337,31 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
           )}
 
           {errorMsg && (
-            <div className="error-box">
+            <div className="error-box card">
               <p>{errorMsg}</p>
               {activeTab === 'url' && (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm switch-tab-btn"
-                  onClick={() => {
-                    setActiveTab('paste');
-                    setErrorMsg('');
-                  }}
-                >
-                  Switch to Paste HTML / Text Mode
-                </button>
+                <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {urlInput && (
+                    <a
+                      href={urlInput}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-outline btn-sm"
+                    >
+                      Open Recipe in New Tab ↗
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      setActiveTab('paste');
+                      setErrorMsg('');
+                    }}
+                  >
+                    Switch to Paste HTML / Text 📋
+                  </button>
+                </div>
               )}
             </div>
           )}

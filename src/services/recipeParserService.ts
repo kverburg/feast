@@ -258,13 +258,25 @@ export async function parsePhotoToRecipe(
 // Extract Recipe JSON object from HTML string (finds Schema.org JSON-LD or Microdata)
 export function parseHtmlContentToRecipe(htmlContent: string, sourceUrl?: string): Partial<Recipe> | null {
   try {
+    // Unwrap JSON wrapper if proxy returned { contents: "<html>..." }
+    if (htmlContent.trim().startsWith('{') && htmlContent.includes('"contents":')) {
+      try {
+        const parsedObj = JSON.parse(htmlContent);
+        if (parsedObj.contents && typeof parsedObj.contents === 'string') {
+          htmlContent = parsedObj.contents;
+        }
+      } catch (e) {}
+    }
+
     // 1. Search for <script type="application/ld+json"> script tags
-    const ldScriptRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    const ldScriptRegex = /<script[^>]*type=[\"'\\]*application\/ld\+json[\"'\\]*>[^>]*>([\s\S]*?)<\/script>/gi;
     let match: RegExpExecArray | null;
 
     while ((match = ldScriptRegex.exec(htmlContent)) !== null) {
-      const jsonStr = match[1].trim();
+      let jsonStr = match[1].trim();
       try {
+        // Sanitize control characters that break JSON.parse
+        jsonStr = jsonStr.replace(/[\u0000-\u001F]+/g, ' ');
         const parsedJson = JSON.parse(jsonStr);
 
         // Helper to find Recipe object inside JSON-LD graph or array
@@ -294,8 +306,8 @@ export function parseHtmlContentToRecipe(htmlContent: string, sourceUrl?: string
           
           let servings = 4;
           if (recipeObj.recipeYield) {
-            const y = Array.isArray(recipeObj.recipeYield) ? recipeObj.recipeYield[0] : recipeObj.recipeYield;
-            const yMatch = String(y).match(/\d+/);
+            const rawYield = Array.isArray(recipeObj.recipeYield) ? recipeObj.recipeYield[0] : (recipeObj.recipeYield.value || recipeObj.recipeYield);
+            const yMatch = String(rawYield).match(/\d+/);
             if (yMatch) servings = parseInt(yMatch[0], 10);
           }
 
@@ -368,37 +380,245 @@ export function parseHtmlContentToRecipe(htmlContent: string, sourceUrl?: string
   }
 }
 
-// Multi-Proxy Web URL Recipe Parser
-export async function parseUrlToRecipe(url: string): Promise<Partial<Recipe>> {
-  const proxies = [
-    (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-    (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`
-  ];
+// ---------------------------------------------------------------------------
+// Jina AI Markdown Parser – parses the clean markdown returned by r.jina.ai
+// ---------------------------------------------------------------------------
+function parseJinaMarkdownToRecipe(markdown: string, sourceUrl?: string): Partial<Recipe> | null {
+  const lines = markdown.split('\n').map(l => l.trim()).filter(Boolean);
 
-  let responseText = '';
+  // Title
+  let title = 'Imported Recipe';
+  for (const l of lines) {
+    const m = l.match(/^Title:\s*(.+)/i);
+    if (m) { title = m[1].trim(); break; }
+    if (l.startsWith('# ')) { title = l.replace(/^#+\s*/, '').trim(); break; }
+  }
 
-  for (const proxyFn of proxies) {
-    try {
-      const proxyUrl = proxyFn(url);
-      const res = await fetch(proxyUrl);
-      if (res.ok) {
-        const text = await res.text();
-        if (text && text.length > 500) {
-          responseText = text;
-          break;
+  // Description (block after ### Description heading)
+  let description = '';
+  const descIdx = lines.findIndex(l => /^#+\s*description/i.test(l));
+  if (descIdx !== -1 && lines[descIdx + 1]) {
+    description = lines[descIdx + 1].replace(/[_*]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim();
+  }
+
+  // First image
+  let image = 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1000&q=80';
+  for (const l of lines) {
+    const m = l.match(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/);
+    if (m) { image = m[1]; break; }
+  }
+
+  // Times / servings from full text
+  let servings = 4;
+  let prepTime = 15;
+  let cookTime = 25;
+  const fullText = lines.join(' ');
+  const servMatch = fullText.match(/(?:yield[s]?|serves?|servings?)[:\s]+(\d+)/i);
+  if (servMatch) servings = parseInt(servMatch[1], 10);
+  const prepMatch = fullText.match(/prep\s*time[:\s]+(\d+)/i);
+  if (prepMatch) prepTime = parseInt(prepMatch[1], 10);
+  const cookMatch = fullText.match(/cook\s*time[:\s]+(\d+)/i);
+  if (cookMatch) cookTime = parseInt(cookMatch[1], 10);
+
+  function cleanMarkdown(s: string): string {
+    return s
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, (_, text) => text)
+      .replace(/[*_~`]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function stripListPrefix(l: string): string {
+    return l.replace(/^([*\-\s]|\[\s*[xX]?\s*\])+/, '').trim();
+  }
+
+  function looksLikeIngredient(l: string): boolean {
+    const clean = cleanMarkdown(stripListPrefix(l));
+    return /^\d|^[¼½¾⅓⅔]|^\d+\s*\/\s*\d+|^(?:a |an |some |pinch|dash|handful|splash|few|sprinkle|extra)/i.test(clean);
+  }
+
+  // Find dedicated Ingredients and Instructions section anchors in the recipe card
+  let ingSectionIdx = lines.findIndex(l => /^#+\s*ingredients/i.test(l));
+  let instSectionIdx = lines.findIndex(l => /^#+\s*(?:instructions|directions|method|preparation)/i.test(l));
+
+  // If no explicit "### Ingredients" header, look for "### Description" or first ingredient-like header
+  let recipeCardStart = ingSectionIdx !== -1 ? ingSectionIdx + 1 : 0;
+  if (ingSectionIdx === -1) {
+    const dIdx = lines.findIndex(l => /^#+\s*description/i.test(l));
+    if (dIdx !== -1) {
+      recipeCardStart = dIdx;
+    } else {
+      for (let i = 0; i < lines.length; i++) {
+        if (/^#{2,4}\s/.test(lines[i])) {
+          for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+            if (looksLikeIngredient(lines[j])) {
+              recipeCardStart = i;
+              break;
+            }
+          }
+          if (recipeCardStart > 0) break;
         }
       }
-    } catch (e) {
-      // Try next proxy
     }
   }
 
-  if (responseText) {
-    const parsed = parseHtmlContentToRecipe(responseText, url);
-    if (parsed) return parsed;
+  const ingSearchEnd = instSectionIdx !== -1 ? instSectionIdx : lines.length;
+
+  // Pass 1: Parse ingredient sections between recipeCardStart and Instructions
+  const ingredientSections: IngredientSection[] = [];
+  let currentSectionTitle = 'Ingredients';
+  let currentItems: IngredientItem[] = [];
+
+  for (let i = recipeCardStart; i < ingSearchEnd; i++) {
+    const l = lines[i];
+
+    if (l === '* * *' || l === '---' || /cook\s*mode/i.test(l)) {
+      if (currentItems.length > 0) {
+        ingredientSections.push({
+          id: `sec-${Math.random().toString(36).substr(2, 6)}`,
+          title: currentSectionTitle,
+          items: currentItems
+        });
+        currentItems = [];
+      }
+      continue;
+    }
+
+    // Section headings like #### Dough, #### Toppings
+    const headingMatch = l.match(/^#{3,5}\s+(.+)/);
+    if (headingMatch) {
+      const h = headingMatch[1].replace(/:$/, '').trim();
+      if (!h.match(/description|note|tip|instruction|keyword|author|rating|print/i) && h.length < 80) {
+        if (currentItems.length > 0) {
+          ingredientSections.push({
+            id: `sec-${Math.random().toString(36).substr(2, 6)}`,
+            title: currentSectionTitle,
+            items: currentItems
+          });
+          currentItems = [];
+        }
+        currentSectionTitle = h;
+      }
+      continue;
+    }
+
+    if (looksLikeIngredient(l)) {
+      const raw = cleanMarkdown(stripListPrefix(l));
+      if (raw.length > 2) {
+        currentItems.push(parseIngredientLine(convertFahrenheitToCelsiusInText(raw)));
+      }
+    }
   }
 
-  // If live proxy fetching failed, return helpful message placeholder
-  throw new Error('Unable to automatically fetch URL due to website CORS restrictions. Please switch to the "Paste HTML/Text" option below to parse instantly!');
+  if (currentItems.length > 0) {
+    ingredientSections.push({
+      id: `sec-${Math.random().toString(36).substr(2, 6)}`,
+      title: currentSectionTitle,
+      items: currentItems
+    });
+  }
+
+  // Pass 2: Parse numbered instruction steps strictly within the Instructions section
+  const instructionSteps: string[] = [];
+  const instStartIdx = instSectionIdx !== -1 ? instSectionIdx + 1 : 0;
+  const instEndIdx = lines.findIndex((l, idx) => idx > instStartIdx && /^#+\s*(?:notes|nutrition|faq|comments)/i.test(l));
+  const finalInstEnd = instEndIdx !== -1 ? instEndIdx : lines.length;
+
+  for (let i = instStartIdx; i < finalInstEnd; i++) {
+    const l = lines[i];
+    const stepMatch = l.match(/^(\d+)\.\s{1,8}(.+)/);
+    if (stepMatch) {
+      const text = cleanMarkdown(stepMatch[2]);
+      if (text.length > 10) {
+        instructionSteps.push(text);
+      }
+    }
+  }
+
+  if (ingredientSections.length === 0 && instructionSteps.length === 0) return null;
+
+  const instructions: InstructionStep[] = instructionSteps.map((text, idx) => {
+    let timerMinutes: number | undefined;
+    const timerMatch = text.match(/(?:bake|cook|boil|simmer|roast|rest|chill|rise|heat|knead)\s+(?:for\s+)?(\d+)[\s-]*(?:to[\s-]*(\d+)\s*)?(?:min|mins|minutes|hour|hours)/i);
+    if (timerMatch) {
+      const val = parseInt(timerMatch[2] || timerMatch[1], 10);
+      timerMinutes = text.toLowerCase().includes('hour') ? val * 60 : val;
+    }
+    return { id: `st-parsed-${idx + 1}`, stepNumber: idx + 1, text: convertFahrenheitToCelsiusInText(text), timerMinutes };
+  });
+
+  return {
+    title,
+    description,
+    servings,
+    prepTime,
+    cookTime,
+    image,
+    sourceUrl,
+    ingredientSections: ingredientSections.length > 0 ? ingredientSections : [{ id: 'sec-1', title: 'Ingredients', items: [{ id: 'ing-1', amount: 1, unit: '', name: 'See source recipe' }] }],
+    instructions: instructions.length > 0 ? instructions : [{ id: 'st-1', stepNumber: 1, text: 'Follow instructions as per recipe source.' }],
+    category: 'Main',
+    tags: ['Web Import'],
+  };
 }
+
+// ---------------------------------------------------------------------------
+// Multi-Proxy Web URL Recipe Parser
+// Primary: Jina AI reader (bypasses bot protection, free, no key needed)
+// Fallback: HTML proxies for non-protected sites
+// ---------------------------------------------------------------------------
+export async function parseUrlToRecipe(url: string): Promise<Partial<Recipe>> {
+  // --- Primary: Jina AI reader ---
+  try {
+    const jinaRes = await fetch(`https://r.jina.ai/${url}`, {
+      headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown' },
+    });
+    if (jinaRes.ok) {
+      const markdown = await jinaRes.text();
+      if (markdown && markdown.length > 300) {
+        const parsed = parseJinaMarkdownToRecipe(markdown, url);
+        if (parsed && ((parsed.ingredientSections?.some(s => s.items.length > 0)) || (parsed.instructions?.length ?? 0) > 1)) {
+          return parsed;
+        }
+      }
+    }
+  } catch (_) { /* fall through to HTML proxies */ }
+
+  // --- Fallback: HTML proxy list ---
+  const proxyFns: Array<(u: string) => Promise<string>> = [
+    async (u) => {
+      const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`);
+      if (!res.ok) return '';
+      const data = await res.json();
+      return data.contents || '';
+    },
+    async (u) => {
+      const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`);
+      return res.ok ? await res.text() : '';
+    },
+    async (u) => {
+      const res = await fetch(`https://cors-get-proxy.sirnev.workers.dev/?url=${encodeURIComponent(u)}`);
+      return res.ok ? await res.text() : '';
+    },
+    async (u) => {
+      const res = await fetch(`https://htmlproxy.site/?url=${encodeURIComponent(u)}`);
+      return res.ok ? await res.text() : '';
+    },
+  ];
+
+  for (const proxyFn of proxyFns) {
+    try {
+      const text = await proxyFn(url);
+      if (text && text.length > 200) {
+        const parsed = parseHtmlContentToRecipe(text, url);
+        if (parsed && (parsed.ingredientSections?.length || parsed.instructions?.length)) {
+          return parsed;
+        }
+      }
+    } catch (_) { /* try next */ }
+  }
+
+  throw new Error('Unable to automatically fetch this URL. Please open it in a new tab, copy the page content, and use the "Paste HTML / Text" tab to import it.');
+}
+
+

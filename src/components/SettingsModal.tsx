@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { getStoredApiKey, saveStoredApiKey } from '../services/storageService';
-import { Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles } from 'lucide-react';
+import { Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
 import { Recipe } from '../types/recipe';
+import { parseCookmateXml } from '../services/cookmateImportService';
 
 interface SettingsModalProps {
   recipes: Recipe[];
@@ -9,6 +10,8 @@ interface SettingsModalProps {
   onResetSeed: () => void;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
+  voiceEnabled: boolean;
+  onToggleVoice: (enabled: boolean) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -17,6 +20,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onResetSeed,
   theme,
   toggleTheme,
+  voiceEnabled,
+  onToggleVoice,
 }) => {
   const [apiKey, setApiKey] = useState(getStoredApiKey());
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -32,7 +37,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(recipes, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `gourmet_craft_recipes_backup_${new Date().toISOString().slice(0,10)}.json`);
+    downloadAnchor.setAttribute("download", `feast_recipes_backup_${new Date().toISOString().slice(0,10)}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -42,9 +47,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
+        const text = event.target?.result as string;
         try {
-          const importedRecipes = JSON.parse(event.target?.result as string);
+          if (file.name.endsWith('.xml') || text.trim().startsWith('<?xml') || text.includes('<cookbook')) {
+            const imported = await parseCookmateXml(text);
+            if (imported.length > 0) {
+              const combined = [...recipes, ...imported];
+              onImportBackup(combined);
+              alert(`Successfully imported ${imported.length} recipes from Cookmate XML!`);
+              return;
+            } else {
+              alert('No valid recipes found in Cookmate XML file.');
+              return;
+            }
+          }
+
+          const importedRecipes = JSON.parse(text);
           if (Array.isArray(importedRecipes)) {
             onImportBackup(importedRecipes);
             alert(`Successfully restored ${importedRecipes.length} recipes!`);
@@ -52,7 +71,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             alert('Invalid backup JSON format.');
           }
         } catch (err) {
-          alert('Error parsing backup JSON file.');
+          alert('Error parsing file: ' + (err as any)?.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const handleImportCookmateXml = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const text = event.target?.result as string;
+          const imported = await parseCookmateXml(text);
+          if (imported.length > 0) {
+            const combined = [...recipes, ...imported];
+            onImportBackup(combined);
+            alert(`🎉 Successfully imported ${imported.length} recipes from Cookmate!`);
+          } else {
+            alert('No valid recipes found in the selected Cookmate XML file.');
+          }
+        } catch (err: any) {
+          alert('Failed to parse Cookmate XML: ' + (err?.message || 'Unknown error'));
         }
       };
       reader.readAsText(file);
@@ -74,11 +116,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </div>
 
       <div className="settings-grid">
-        {/* Appearance Section */}
+        {/* Appearance & Preferences */}
         <div className="settings-card card">
           <div className="card-sec-header">
             {theme === 'dark' ? <Moon size={20} color="var(--accent-primary)" /> : <Sun size={20} color="var(--accent-primary)" />}
-            <h3>Appearance</h3>
+            <h3>Appearance & Preferences</h3>
           </div>
 
           <div className="setting-row">
@@ -89,6 +131,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <button className="btn btn-secondary" onClick={toggleTheme}>
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
               <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+            </button>
+          </div>
+
+          <div className="setting-row">
+            <div>
+              <span className="setting-name">Voice Assistant & Hands-Free Commands</span>
+              <p className="setting-desc">Enable spoken step reading and voice controls in Cook Mode (disabled by default).</p>
+            </div>
+            <button
+              className={`btn ${voiceEnabled ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => onToggleVoice(!voiceEnabled)}
+            >
+              {voiceEnabled ? <Mic size={18} /> : <MicOff size={18} />}
+              <span>{voiceEnabled ? 'Voice Enabled' : 'Voice Disabled'}</span>
             </button>
           </div>
         </div>
@@ -113,13 +169,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <div className="setting-row">
             <div>
+              <span className="setting-name">Import Cookmate Export (.xml)</span>
+              <p className="setting-desc">Import all recipes directly from your Cookmate XML file.</p>
+            </div>
+            <label className="btn btn-primary btn-sm file-label">
+              <FileCode size={16} />
+              <span>Import Cookmate XML</span>
+              <input type="file" accept=".xml" onChange={handleImportCookmateXml} className="hidden-file-input" />
+            </label>
+          </div>
+
+          <div className="setting-row">
+            <div>
               <span className="setting-name">Restore Backup</span>
-              <p className="setting-desc">Import recipes from a Cookmate or GourmetCraft JSON file.</p>
+              <p className="setting-desc">Import recipes from a Cookmate or Feast JSON/XML backup.</p>
             </div>
             <label className="btn btn-secondary btn-sm file-label">
               <Upload size={16} />
-              <span>Import JSON</span>
-              <input type="file" accept=".json" onChange={handleImportBackup} className="hidden-file-input" />
+              <span>Import JSON / XML</span>
+              <input type="file" accept=".json,.xml" onChange={handleImportBackup} className="hidden-file-input" />
             </label>
           </div>
 

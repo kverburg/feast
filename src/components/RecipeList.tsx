@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Recipe } from '../types/recipe';
 import { RecipeCard } from './RecipeCard';
-import { Sparkles, SlidersHorizontal, Heart, Utensils } from 'lucide-react';
+import { Sparkles, SlidersHorizontal, Heart, Utensils, RotateCcw } from 'lucide-react';
 
 interface RecipeListProps {
   recipes: Recipe[];
@@ -9,6 +9,7 @@ interface RecipeListProps {
   onSelectRecipe: (recipe: Recipe) => void;
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
   onOpenImportModal: () => void;
+  onResetSeed?: () => void;
 }
 
 const CATEGORIES = ['All', 'Favorites', 'Main', 'Appetizer', 'Dessert', 'Baking', 'Breakfast', 'Beverage', 'Side', 'Sauce'];
@@ -19,6 +20,7 @@ export const RecipeList: React.FC<RecipeListProps> = ({
   onSelectRecipe,
   onToggleFavorite,
   onOpenImportModal,
+  onResetSeed,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [sortBy, setSortBy] = useState<'newest' | 'title' | 'time'>('newest');
@@ -79,17 +81,34 @@ export const RecipeList: React.FC<RecipeListProps> = ({
           ))}
         </div>
 
-        <div className="sort-controls">
-          <SlidersHorizontal size={15} color="var(--text-dim)" />
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
-            className="sort-select"
-          >
-            <option value="newest">Sort by: Newest</option>
-            <option value="title">Sort by: Name (A-Z)</option>
-            <option value="time">Sort by: Quickest Time</option>
-          </select>
+        <div className="filter-right-group">
+          {onResetSeed && (
+            <button
+              className="btn btn-outline btn-sm reset-recipes-btn"
+              onClick={() => {
+                if (confirm('Are you sure you want to remove all added recipes and reset to the default ones? This cannot be undone.')) {
+                  onResetSeed();
+                }
+              }}
+              title="Remove all added recipes and keep only the default recipes"
+            >
+              <RotateCcw size={14} />
+              <span>Reset to Defaults</span>
+            </button>
+          )}
+
+          <div className="sort-controls">
+            <SlidersHorizontal size={15} color="var(--text-dim)" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="sort-select"
+            >
+              <option value="newest">Sort by: Newest</option>
+              <option value="title">Sort by: Name (A-Z)</option>
+              <option value="time">Sort by: Quickest Time</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -178,6 +197,16 @@ export const RecipeList: React.FC<RecipeListProps> = ({
         }
         .pill-icon {
           fill: currentColor;
+        }
+        .filter-right-group {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          flex-wrap: wrap;
+        }
+        .reset-recipes-btn {
+          font-size: 0.82rem;
+          gap: 0.35rem;
         }
         .sort-controls {
           display: flex;
