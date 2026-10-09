@@ -2,9 +2,10 @@ name = "feast"
 main = "worker/index.js"
 compatibility_date = "2025-01-01"
 
-# Only reachable via your domain (so Cloudflare Access always applies)
+# No public workers.dev address. Preview URLs (per-PR test versions) stay on,
+# protected by the Worker Access policy ("production and previews") and the worker's own header check.
 workers_dev = false
-preview_urls = false
+preview_urls = true
 routes = [{ pattern = "feast.kmverburg.nl", custom_domain = true }]
 
 # Static Vite build output; unknown paths fall back to index.html (SPA).

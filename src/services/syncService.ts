@@ -3,19 +3,20 @@
 // The Gemini API key, theme and voice setting are deliberately NOT synced.
 // If /api/state is unavailable (e.g. local dev), the app silently stays local-only.
 
-const SYNCED_KEYS: Record<string, 'recipes' | 'shopping'> = {
+const SYNCED_KEYS: Record<string, string> = {
   gourmet_craft_recipes_v1: 'recipes',
   gourmet_craft_shopping_v1: 'shopping',
+  gourmet_craft_mealplan_v1: 'mealplan',
 };
 
-type SyncData = { recipes: unknown; shopping: unknown };
+type SyncData = Record<string, unknown>;
 
 const nativeSetItem = Storage.prototype.setItem;
 let rev = 0;
 let timer: number | undefined;
 
 const readLocal = (): SyncData => {
-  const out: SyncData = { recipes: null, shopping: null };
+  const out: SyncData = {};
   for (const [key, field] of Object.entries(SYNCED_KEYS)) {
     try {
       const raw = localStorage.getItem(key);
@@ -27,7 +28,7 @@ const readLocal = (): SyncData => {
   return out;
 };
 
-const writeLocal = (data: Partial<SyncData>) => {
+const writeLocal = (data: SyncData) => {
   for (const [key, field] of Object.entries(SYNCED_KEYS)) {
     if (data[field] != null) nativeSetItem.call(localStorage, key, JSON.stringify(data[field]));
   }
@@ -82,5 +83,5 @@ export const initSync = async (): Promise<void> => {
   });
 
   // First run against an empty KV: upload what this browser already has.
-  if (rev === 0 && (readLocal().recipes || readLocal().shopping)) void push();
+  if (rev === 0 && Object.values(readLocal()).some(Boolean)) void push();
 };

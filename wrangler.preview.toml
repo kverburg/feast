@@ -1,0 +1,18 @@
+# Used by CI to upload a per-PR test version of the same worker (never deployed to production).
+# Identical to wrangler.toml except it binds a separate KV namespace, so test data never touches real recipes.
+name = "feast"
+main = "worker/index.js"
+compatibility_date = "2025-01-01"
+
+workers_dev = false
+preview_urls = true
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[kv_namespaces]]
+binding = "FEAST"
+id = "610879616dd24899a76d4ec3398766a4"

@@ -1,9 +1,9 @@
 import React from 'react';
-import { UtensilsCrossed, PlusCircle, ShoppingBag, Settings, Sun, Moon, Search, Sparkles } from 'lucide-react';
+import { UtensilsCrossed, PlusCircle, ShoppingBag, Settings, Sun, Moon, Search, Sparkles, CalendarDays } from 'lucide-react';
 
 interface NavbarProps {
-  currentTab: 'recipes' | 'shopping' | 'settings';
-  setCurrentTab: (tab: 'recipes' | 'shopping' | 'settings') => void;
+  currentTab: 'recipes' | 'meals' | 'shopping' | 'settings';
+  setCurrentTab: (tab: 'recipes' | 'meals' | 'shopping' | 'settings') => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   onOpenAddModal: () => void;
@@ -32,6 +32,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <UtensilsCrossed size={24} color="#ffffff" />
             </div>
             <span className="brand-name">Gourmet<span className="brand-highlight">Craft</span></span>
+            {(import.meta as any).env?.VITE_APP_ENV === 'preview' && <span className="env-badge">TEST</span>}
           </div>
 
           <div className="search-box">
@@ -46,6 +47,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="nav-actions">
+            <button className={`btn btn-secondary btn-sm ${currentTab === 'meals' ? 'active' : ''}`} onClick={() => setCurrentTab('meals')} title="Meal Planner">
+              <CalendarDays size={16} />
+              <span>Meals</span>
+            </button>
             <button className="btn btn-outline btn-sm" onClick={onOpenImportModal}>
               <Sparkles size={16} />
               <span>Import Recipe</span>
@@ -85,6 +90,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <PlusCircle size={22} />
           <span>Add</span>
+        </button>
+
+        <button
+          className={`mobile-nav-item ${currentTab === 'meals' ? 'active' : ''}`}
+          onClick={() => setCurrentTab('meals')}
+        >
+          <CalendarDays size={20} />
+          <span>Meals</span>
         </button>
 
         <button
@@ -147,6 +160,15 @@ export const Navbar: React.FC<NavbarProps> = ({
         }
         .brand-highlight {
           color: var(--accent-primary);
+        }
+        .env-badge {
+          background: #dc2626;
+          color: #ffffff;
+          font-size: 0.65rem;
+          font-weight: 800;
+          padding: 0.15rem 0.45rem;
+          border-radius: var(--radius-full);
+          letter-spacing: 0.05em;
         }
         .search-box {
           position: relative;
@@ -214,7 +236,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             font-size: 0.72rem;
             font-weight: 500;
             cursor: pointer;
-            width: 20%;
+            width: 16%;
             height: 100%;
           }
           .mobile-nav-item.active {
