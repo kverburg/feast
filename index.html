@@ -2,7 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍳</text></svg>" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- use-credentials: the site sits behind Cloudflare Access, so the manifest request needs the login cookie -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <meta name="theme-color" content="#4e6b54" />
+    <meta name="apple-mobile-web-app-title" content="Feast" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Feast - Smart Recipe Manager & Portions Scaler</title>
     <!-- Google Fonts: Outfit & Inter -->
