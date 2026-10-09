@@ -1,4 +1,5 @@
 name = "feast"
+main = "worker/index.js"
 compatibility_date = "2025-01-01"
 
 # Only reachable via your domain (so Cloudflare Access always applies)
@@ -6,7 +7,14 @@ workers_dev = false
 preview_urls = false
 routes = [{ pattern = "feast.kmverburg.nl", custom_domain = true }]
 
-# Static Vite build output; unknown paths fall back to index.html (SPA)
+# Static Vite build output; unknown paths fall back to index.html (SPA).
+# /api/* must hit the worker first, otherwise the SPA fallback would answer it.
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[kv_namespaces]]
+binding = "FEAST"
+id = "PASTE_KV_ID_HERE"
