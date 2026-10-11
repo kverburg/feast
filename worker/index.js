@@ -41,17 +41,51 @@ async function handleGemini(url, req, env) {
   return new Response('Not found', { status: 404 });
 }
 
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // the app resizes uploads to ~200 KB first
+
+// Recipe images uploaded from the edit form: stored in KV so they do not bloat the synced recipe state.
+async function handleImage(url, req, env) {
+  const id = url.pathname.slice('/api/image'.length).replace(/^\//, '');
+
+  if (!id && req.method === 'POST') {
+    const type = (req.headers.get('Content-Type') || '').split(';')[0];
+    if (!IMAGE_TYPES.has(type)) return json({ error: 'unsupported_type' }, 415);
+    const data = await req.arrayBuffer();
+    if (data.byteLength === 0 || data.byteLength > MAX_IMAGE_BYTES) return json({ error: 'bad_size' }, 413);
+    const newId = crypto.randomUUID();
+    await env.FEAST.put(`img:${newId}`, data, { metadata: { type } });
+    return json({ url: `/api/image/${newId}` });
+  }
+
+  if (id && req.method === 'GET') {
+    if (!/^[0-9a-f-]{36}$/.test(id)) return new Response('Not found', { status: 404 });
+    const { value, metadata } = await env.FEAST.getWithMetadata(`img:${id}`, 'arrayBuffer');
+    if (!value) return new Response('Not found', { status: 404 });
+    return new Response(value, {
+      headers: {
+        'Content-Type': metadata?.type || 'image/jpeg',
+        'Cache-Control': 'private, max-age=31536000, immutable',
+      },
+    });
+  }
+
+  return new Response('Method not allowed', { status: 405 });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const isState = url.pathname === '/api/state';
     const isGemini = url.pathname.startsWith('/api/gemini/');
-    if (!isState && !isGemini) return env.ASSETS.fetch(req);
+    const isImage = url.pathname === '/api/image' || url.pathname.startsWith('/api/image/');
+    if (!isState && !isGemini && !isImage) return env.ASSETS.fetch(req);
 
     // Cloudflare Access adds this header after login. Without it, refuse.
     if (!req.headers.get('Cf-Access-Jwt-Assertion')) return new Response('Forbidden', { status: 403 });
 
     if (isGemini) return handleGemini(url, req, env);
+    if (isImage) return handleImage(url, req, env);
 
     const raw = await env.FEAST.get('state');
     const current = raw ? JSON.parse(raw) : { rev: 0, data: null };
