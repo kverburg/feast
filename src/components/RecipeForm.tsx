@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Recipe, IngredientSection, InstructionStep } from '../types/recipe';
+import { uploadRecipeImage } from '../services/imageService';
 import { Plus, Trash2, Layers, Clock, Users, X, Save, Sparkles, Image as ImageIcon } from 'lucide-react';
 
 interface RecipeFormProps {
@@ -21,6 +22,8 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
   const [prepTime, setPrepTime] = useState(initialRecipe?.prepTime || 15);
   const [cookTime, setCookTime] = useState(initialRecipe?.cookTime || 20);
   const [servings, setServings] = useState(initialRecipe?.servings || 4);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState('');
   const [image, setImage] = useState(initialRecipe?.image || 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=1000&q=80');
   const [tagsInput, setTagsInput] = useState(initialRecipe?.tags ? initialRecipe.tags.join(', ') : '');
 
@@ -134,6 +137,21 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
     });
   };
 
+  const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow choosing the same file again
+    if (!file) return;
+    setImageBusy(true);
+    setImageError('');
+    try {
+      setImage(await uploadRecipeImage(file));
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : 'Upload failed.');
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -237,14 +255,31 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
             </div>
 
             <div className="input-group">
-              <label className="input-label">Image URL</label>
-              <input
-                type="text"
-                placeholder="https://images.unsplash.com/..."
-                value={image}
-                onChange={(e) => setImage(e.target.value)}
-                className="input-field"
-              />
+              <label className="input-label">Image</label>
+              {image && (
+                <img
+                  src={image}
+                  alt="Recipe"
+                  className="image-edit-preview"
+                  onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')}
+                  onLoad={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'visible')}
+                />
+              )}
+              <div className="image-edit-row">
+                <input
+                  type="text"
+                  placeholder={image.startsWith('data:') ? 'Uploaded image in use. Paste a URL to replace it.' : 'Paste an image URL (https://...)'}
+                  value={image.startsWith('data:') ? '' : image}
+                  onChange={(e) => setImage(e.target.value)}
+                  className="input-field"
+                />
+                <label className={`btn btn-outline btn-sm image-upload-btn ${imageBusy ? 'disabled' : ''}`}>
+                  <ImageIcon size={16} />
+                  <span>{imageBusy ? 'Uploading...' : 'Upload image'}</span>
+                  <input type="file" accept="image/*" onChange={handleImageFile} disabled={imageBusy} hidden />
+                </label>
+              </div>
+              {imageError && <p className="image-edit-error">{imageError}</p>}
             </div>
 
             <div className="input-group">
@@ -453,6 +488,36 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
           display: flex;
           flex-direction: column;
           gap: 0.5rem;
+        }
+        .image-edit-preview {
+          width: 100%;
+          max-height: 220px;
+          object-fit: cover;
+          border-radius: var(--radius-md);
+          border: 1px solid var(--border-color);
+          margin-bottom: 0.5rem;
+        }
+        .image-edit-row {
+          display: flex;
+          gap: 0.5rem;
+          align-items: center;
+        }
+        .image-edit-row .input-field {
+          flex: 1;
+          min-width: 0;
+        }
+        .image-upload-btn {
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .image-upload-btn.disabled {
+          opacity: 0.6;
+          pointer-events: none;
+        }
+        .image-edit-error {
+          color: #ef4444;
+          font-size: 0.85rem;
+          margin-top: 0.4rem;
         }
         .item-row {
           display: flex;
