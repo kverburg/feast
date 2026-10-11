@@ -134,7 +134,7 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
   const handleSaveImported = async () => {
     if (!parsedResult) return;
 
-    // The recipe is saved right away in English; the background queue translates it with Gemini.
+    // The recipe is saved right away in its original language; the background queue translates it with Gemini.
     setSaving(true);
     const chosenCategory = parsedResult.category || 'Main';
     const chosenTitle = parsedResult.title || 'Imported Recipe';
@@ -431,7 +431,7 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({
               {geminiAvailable === false && (
                 <div className="error-box card">
                   <p>
-                    Gemini API key missing: this recipe cannot be translated to Dutch, so it can't be saved yet.
+                    Gemini API key missing: this recipe cannot be translated, so it can't be saved yet.
                     Add a key in Settings first.
                   </p>
                 </div>

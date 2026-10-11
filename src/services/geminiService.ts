@@ -164,18 +164,21 @@ Analyze this recipe content and respond ONLY with a JSON object matching this sc
   }
 }
 
-export interface GeminiDutchRecipe {
+export interface GeminiTranslation {
+  // 'nl' when the source recipe was Dutch (translated to English); 'other' otherwise (translated to Dutch)
+  sourceLanguage: 'nl' | 'other';
   title: string;
   description: string;
   ingredientSections: IngredientSection[];
   instructions: InstructionStep[];
 }
 
-// Translate a whole recipe to natural Dutch in one call. Structure, amounts and timers come from
-// the original; only wording (and unit labels such as cloves -> teentjes) is taken from the model.
+// Translate a whole recipe in one call: Dutch recipes go to English, everything else goes to Dutch.
+// Structure, amounts and timers come from the original; only wording (and unit labels such as
+// cloves <-> teentjes) is taken from the model.
 export async function translateRecipeWithGemini(
   recipe: Partial<Recipe>
-): Promise<GeminiDutchRecipe> {
+): Promise<GeminiTranslation> {
   const source = {
     title: recipe.title || '',
     description: recipe.description || '',
@@ -186,13 +189,15 @@ export async function translateRecipeWithGemini(
     instructions: (recipe.instructions || []).map((st) => ({ text: st.text })),
   };
 
-  const prompt = `Translate this recipe from English to Dutch, the way a good Dutch cookbook would write it.
+  const prompt = `Below is a recipe. First decide whether it is written in Dutch.
+- If it is Dutch, translate it into natural English, the way a good English cookbook would write it.
+- Otherwise (English or any other language), translate it into natural Dutch, the way a good Dutch cookbook would write it.
 Rules:
-- Natural, fluent Dutch for home cooks. Use the usual Dutch cooking terms; do not translate word by word.
-- Ingredient names: normal Dutch names in lowercase unless a proper noun (e.g. "Parmigiano-Reggiano"). Keep brand names.
-- Units: Dutch abbreviations (g, kg, ml, l, el for tablespoon, tl for teaspoon), or "teentje"/"teentjes", "snufje", "stuk"/"stuks", "bosje". Do not convert amounts or switch unit systems.
+- Natural, fluent text for home cooks. Use the usual cooking terms of the target language; do not translate word by word.
+- Ingredient names: normal names of the target language, lowercase unless a proper noun (e.g. "Parmigiano-Reggiano"). Keep brand names.
+- Units: use the target language's usual abbreviations or words (Dutch: g, kg, ml, l, el, tl, teentje/teentjes, snufje, stuk/stuks, bosje; English: g, kg, ml, l, tbsp, tsp, clove/cloves, pinch, piece/pieces, bunch). Do not convert amounts or switch unit systems.
 - Keep every number, the number of sections, items and steps, and their order exactly as given. Do not add or remove anything.
-- Respond ONLY with JSON of exactly the same shape as the input ("notes" stays null when it is null).
+- Respond ONLY with JSON of exactly the same shape as the input ("notes" stays null when it is null), plus one extra field "sourceLanguage": "nl" if the source recipe was Dutch, otherwise "other".
 
 Recipe JSON:
 ${JSON.stringify(source)}`;
@@ -208,6 +213,7 @@ ${JSON.stringify(source)}`;
   const steps = recipe.instructions || [];
   const valid =
     typeof out.title === 'string' &&
+    (out.sourceLanguage === 'nl' || out.sourceLanguage === 'other') &&
     Array.isArray(out.ingredientSections) &&
     out.ingredientSections.length === sections.length &&
     out.ingredientSections.every((s: any, i: number) => Array.isArray(s.items) && s.items.length === sections[i].items.length) &&
@@ -216,6 +222,7 @@ ${JSON.stringify(source)}`;
   if (!valid) throw new Error('Gemini returned a translation with a different structure.');
 
   return {
+    sourceLanguage: out.sourceLanguage,
     title: out.title || recipe.title || '',
     description: typeof out.description === 'string' ? out.description : recipe.description || '',
     ingredientSections: sections.map((section, si) => ({
