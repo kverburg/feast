@@ -82,7 +82,6 @@ export async function parseCookmateXml(xmlString: string): Promise<Recipe[]> {
     const imageurl = getField('imageurl');
     // Use image search service to find a photo if imageurl is absent or a local Android file path
     const image = await findImageForRecipe(title, category, imageurl, [getField('category')].filter(Boolean));
-    const lang = getField('lang').toLowerCase();
 
     // Parse ingredients <li>...</li>
     const ingBlockMatch = rawBlock.match(/<ingredient>(.*?)<\/ingredient>/s);
@@ -172,9 +171,8 @@ export async function parseCookmateXml(xmlString: string): Promise<Recipe[]> {
       createdAt: new Date().toISOString(),
     };
 
-    // English recipes are queued for Gemini translation to Dutch (the English original is kept)
-    const isEnglish = lang === 'en' || (!lang && /^(apple|banana|pie|chicken|beef|pasta|cookie|bread|cake)/i.test(title));
-    recipes.push(isEnglish ? withPendingTranslation(baseRecipe) : baseRecipe);
+    // Every recipe is queued: Dutch ones get an English version, others a Dutch one
+    recipes.push(withPendingTranslation(baseRecipe));
 
   }
 

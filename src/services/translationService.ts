@@ -3,42 +3,41 @@ import { translateRecipeWithGemini, isGeminiAvailable, classifyGeminiError, Gemi
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
 
 // ---------------------------------------------------------------------------
-// Dutch translation via Gemini, run as a background queue.
-// A recipe waiting for translation carries its English text in the main fields plus a copy in
-// the *En fields, and translationPending. The queue translates one recipe at a time, backs off
-// on rate limits, and reports a missing or rejected key through subscribeTranslationError.
-// The flag lives on the recipe, so the queue survives reloads and syncs across devices.
+// Translation via Gemini, run as a background queue.
+// Dutch recipes get an English version, every other language gets a Dutch one; the main fields
+// always hold Dutch and the *En fields the English text. A recipe waiting for translation keeps
+// its original text in the main fields plus translationPending. The queue translates one recipe
+// at a time, backs off on rate limits, and reports a missing or rejected key through
+// subscribeTranslationError. The flag lives on the recipe, so it survives reloads and syncs.
 // ---------------------------------------------------------------------------
 
 const MISSING_KEY_MESSAGE =
-  'Gemini API key missing: recipes cannot be translated to Dutch. Add a key in Settings.';
+  'Gemini API key missing: recipes cannot be translated. Add a key in Settings.';
 const rejectedKeyMessage = (status?: number) =>
-  `Gemini rejected the request${status ? ` (status ${status})` : ''}: check the API key in Settings. Recipes stay in English until it works.`;
+  `Gemini rejected the request${status ? ` (status ${status})` : ''}: check the API key in Settings. Recipes stay untranslated until it works.`;
 
-/** Turn a freshly imported English recipe into one that waits for its Dutch translation. */
+const contentHash = (r: Recipe): string => {
+  const text = JSON.stringify([r.title, r.description, r.ingredientSections, r.instructions]);
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  return String(h);
+};
+
+/** Mark a freshly imported recipe (any language) as waiting for translation. */
 export function withPendingTranslation(recipe: Recipe): Recipe {
-  return {
-    ...recipe,
-    titleEn: recipe.title,
-    descriptionEn: recipe.description,
-    ingredientSectionsEn: recipe.ingredientSections,
-    instructionsEn: recipe.instructions,
-    translationPending: true,
-  };
+  return { ...recipe, translationPending: true, translationSourceHash: contentHash(recipe) };
 }
 
-const englishSource = (r: Recipe): Partial<Recipe> => ({
-  title: r.titleEn,
-  description: r.descriptionEn,
-  ingredientSections: r.ingredientSectionsEn,
-  instructions: r.instructionsEn,
-});
-
-// A queued recipe still carries the English text in its main fields; untouched means it still does.
-const isUntouchedPending = (r: Recipe): boolean =>
-  !!r.translationPending &&
-  JSON.stringify([r.title, r.ingredientSections, r.instructions]) ===
-    JSON.stringify([r.titleEn, r.ingredientSectionsEn, r.instructionsEn]);
+// Still exactly as queued, so translating it loses nothing. Recipes queued by an older version
+// carry an English copy in the *En fields instead of a hash.
+const isUntouchedPending = (r: Recipe): boolean => {
+  if (!r.translationPending) return false;
+  if (r.translationSourceHash) return contentHash(r) === r.translationSourceHash;
+  return (
+    JSON.stringify([r.title, r.ingredientSections, r.instructions]) ===
+    JSON.stringify([r.titleEn, r.ingredientSectionsEn, r.instructionsEn])
+  );
+};
 
 const GAP_BETWEEN_CALLS_MS = 6000; // stay under free-tier requests-per-minute
 const FIRST_BACKOFF_MS = 60_000;
@@ -87,6 +86,14 @@ export function startTranslationQueue(): void {
 async function runQueue(): Promise<void> {
   let backoff = FIRST_BACKOFF_MS;
 
+  // Recipes without a second language yet (imported earlier, added by hand, ...) join the queue too.
+  const all = getStoredRecipes();
+  if (all.some((r) => !r.titleEn && !r.translationPending && !r.id.startsWith('seed-'))) {
+    saveStoredRecipes(
+      all.map((r) => (!r.titleEn && !r.translationPending && !r.id.startsWith('seed-') ? withPendingTranslation(r) : r))
+    );
+  }
+
   // A recipe edited by hand while it was queued no longer wants the automatic translation.
   const stored = getStoredRecipes();
   if (stored.some((r) => r.translationPending && !isUntouchedPending(r))) {
@@ -118,19 +125,37 @@ async function runQueue(): Promise<void> {
     }
 
     try {
-      const result = await translateRecipeWithGemini(englishSource(next));
+      const result = await translateRecipeWithGemini(next);
       // Re-read storage so edits made while we were waiting are not overwritten.
       const latest = getStoredRecipes();
       const idx = latest.findIndex((r) => r.id === next.id);
       if (idx !== -1 && isUntouchedPending(latest[idx])) {
-        latest[idx] = {
-          ...latest[idx],
+        const current = latest[idx];
+        const translated = {
           title: result.title,
           description: result.description,
           ingredientSections: result.ingredientSections,
           instructions: result.instructions,
+        };
+        const original = {
+          title: current.title,
+          description: current.description,
+          ingredientSections: current.ingredientSections,
+          instructions: current.instructions,
+        };
+        // Dutch source: keep it as is and store the translation as the English version.
+        // Anything else: the translation becomes the Dutch main text, the original the English one.
+        const [dutch, english] = result.sourceLanguage === 'nl' ? [original, translated] : [translated, original];
+        latest[idx] = {
+          ...current,
+          ...dutch,
+          titleEn: english.title,
+          descriptionEn: english.description,
+          ingredientSectionsEn: english.ingredientSections,
+          instructionsEn: english.instructions,
           translationVersion: 2,
           translationPending: false,
+          translationSourceHash: undefined,
         };
         saveStoredRecipes(latest);
         changeListeners.forEach((cb) => cb());

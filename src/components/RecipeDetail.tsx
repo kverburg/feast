@@ -164,9 +164,9 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         <div className="hero-content">
           <h1 className="hero-title">{displayTitle}</h1>
           <p className="hero-description">{displayDescription}</p>
-          {recipe.translationPending && language === 'nl' && (
+          {recipe.translationPending && (
             <p className="hero-description" style={{ fontSize: '0.85rem', opacity: 0.7 }}>
-              Nederlandse vertaling volgt… (staat in de wachtrij)
+              {language === 'nl' ? 'Vertaling volgt… (staat in de wachtrij)' : 'Translation pending… (in the queue)'}
             </p>
           )}
 

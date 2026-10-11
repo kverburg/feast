@@ -52,8 +52,8 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
 
       <div className="card-content">
         <h3 className="card-title">{recipe.title}</h3>
-        {recipe.translationPending && language === 'nl' && (
-          <span className="translation-pending">Nederlandse vertaling volgt…</span>
+        {recipe.translationPending && (
+          <span className="translation-pending">{language === 'nl' ? 'Vertaling volgt…' : 'Translation pending…'}</span>
         )}
         <p className="card-description">{recipe.description}</p>
 
