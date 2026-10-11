@@ -76,16 +76,11 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   // Portion Scaling State
   const [currentServings, setCurrentServings] = useState<number>(recipe.servings || 4);
   const [unitSystem, setUnitSystem] = useState<'metric' | 'imperial'>('metric');
-  const [checkedIngredients, setCheckedIngredients] = useState<Record<string, boolean>>({});
   const [checkedSteps, setCheckedSteps] = useState<Record<string, boolean>>({});
   const [activeTimer, setActiveTimer] = useState<{ stepId: string; secondsLeft: number } | null>(null);
 
   const scaleRatio = currentServings / (recipe.servings || 1);
 
-
-  const toggleIngredientCheck = (id: string) => {
-    setCheckedIngredients(prev => ({ ...prev, [id]: !prev[id] }));
-  };
 
   const toggleStepCheck = (id: string) => {
     setCheckedSteps(prev => ({ ...prev, [id]: !prev[id] }));
@@ -191,14 +186,6 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                 <span className="stat-val">{recipe.prepTime}m / {recipe.cookTime}m</span>
               </div>
             </div>
-
-            <div className="stat-card highlight">
-              <Users size={20} color="var(--accent-primary)" />
-              <div className="stat-info">
-                <span className="stat-label">Portions</span>
-                <span className="stat-val">{currentServings} servings</span>
-              </div>
-            </div>
           </div>
 
           <div className="hero-cta-bar">
@@ -286,21 +273,12 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
 
                 <ul className="ingredient-list">
                   {section.items.map((item) => {
-                    const isChecked = !!checkedIngredients[item.id];
                     const scaledAmt = item.amount * scaleRatio;
                     const converted = convertUnit(scaledAmt, item.unit, unitSystem, item.name);
                     const formattedAmt = formatAmount(converted.amount);
 
                     return (
-                      <li
-                        key={item.id}
-                        className={`ingredient-item ${isChecked ? 'checked' : ''}`}
-                        onClick={() => toggleIngredientCheck(item.id)}
-                      >
-                        <div className="check-box">
-                          {isChecked ? <CheckSquare size={18} color="var(--accent-primary)" /> : <Square size={18} color="var(--text-dim)" />}
-                        </div>
-
+                      <li key={item.id} className="ingredient-item">
                         <div className="item-details">
                           <span className="item-amount">{formattedAmt} {converted.unit}</span>
                           <span className="item-name">{item.name}</span>
@@ -476,6 +454,50 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           padding: 0.85rem 1.75rem;
           font-size: 1.05rem;
         }
+        @media (max-width: 600px) {
+          .hero-content {
+            padding: 1.25rem;
+          }
+          .hero-title {
+            font-size: 1.6rem;
+          }
+          .ingredients-column, .instructions-column {
+            padding: 1.1rem;
+          }
+          .stat-label {
+            white-space: nowrap;
+          }
+          .stat-val {
+            white-space: nowrap;
+            font-size: 0.95rem;
+          }
+          /* Two by two: stats side by side, then Cook Mode and Source Link side by side */
+          .hero-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+          }
+          .stat-card {
+            padding: 0.65rem 0.85rem;
+            gap: 0.6rem;
+            min-width: 0;
+          }
+          .hero-cta-bar {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+          }
+          .hero-cta-bar .btn {
+            width: 100%;
+            justify-content: center;
+            padding: 0.75rem 0.5rem;
+            font-size: 0.95rem;
+            text-align: center;
+          }
+          .hero-cta-bar .btn:only-child {
+            grid-column: 1 / -1;
+          }
+        }
         .detail-body-grid {
           display: grid;
           grid-template-columns: 1fr;
@@ -604,24 +626,15 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           border-radius: var(--radius-md);
           background: var(--bg-input);
           border: 1px solid var(--border-color);
-          cursor: pointer;
-          transition: background 0.2s ease;
-        }
-        .ingredient-item:hover {
-          background: var(--bg-card-hover);
-        }
-        .ingredient-item.checked {
-          opacity: 0.5;
-          text-decoration: line-through;
-        }
-        .check-box {
-          margin-top: 2px;
         }
         .item-details {
-          display: flex;
-          gap: 0.4rem;
-          flex-wrap: wrap;
+          /* Plain inline text flow: amount, name and notes wrap like a sentence, not as separate boxes */
+          display: block;
           font-size: 0.92rem;
+          line-height: 1.5;
+        }
+        .item-details > span + span {
+          margin-left: 0.4rem;
         }
         .item-amount {
           font-weight: 700;

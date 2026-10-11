@@ -463,6 +463,28 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
         .item-unit { width: 110px; }
         .item-name { flex: 2; }
         .item-notes { flex: 1; }
+        @media (max-width: 600px) {
+          /* One ingredient per card: qty + unit + remove on top, name and notes full width below */
+          .item-row {
+            display: grid;
+            grid-template-columns: 90px 1fr 40px;
+            grid-template-areas:
+              'qty unit remove'
+              'name name name'
+              'notes notes notes';
+            gap: 0.5rem;
+            padding: 0.75rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+          }
+          .item-row .item-qty { grid-area: qty; width: auto; min-width: 0; }
+          .item-row .item-unit { grid-area: unit; width: auto; min-width: 0; }
+          .item-row .item-name { grid-area: name; }
+          .item-row .item-notes { grid-area: notes; }
+          .item-row .btn { grid-area: remove; padding: 0.5rem; justify-self: end; }
+          .add-item-btn { align-self: stretch; justify-content: center; text-align: center; }
+        }
         .add-item-btn {
           align-self: flex-start;
           margin-top: 0.25rem;
