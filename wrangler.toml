@@ -19,6 +19,8 @@ crons = ["* * * * *"]
 [vars]
 GEMINI_MODEL = "gemini-flash-latest"
 GEMINI_MODEL_LIGHT = "gemini-flash-lite-latest"
+# Background work uses the Gemini batch API ("off" = direct calls). GEMINI_MODEL_BATCH can force a batch model.
+GEMINI_BATCH = "on"
 
 [observability]
 enabled = true

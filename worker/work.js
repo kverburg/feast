@@ -10,10 +10,18 @@
 //    so it cannot collide with what you are editing.
 //  - The app fetches the patches the next time it is open, applies the ones that still match the recipe
 //    (same fingerprint), and acknowledges them.
-import { translateRecipe, annotateVersion } from '../src/shared/geminiTasks.ts';
+import {
+  translateRecipe,
+  annotateVersion,
+  buildTranslationRequest,
+  parseTranslation,
+  buildAnnotationRequest,
+  parseAnnotation,
+  readJson,
+} from '../src/shared/geminiTasks.ts';
 import { classifyGeminiError, GeminiHttpError } from '../src/shared/geminiErrors.ts';
 import { contentHash, annotationSource, isUntouchedPending, needsAnnotation } from '../src/shared/recipeWork.ts';
-import { generateContent } from './gemini.js';
+import { generateContent, batchModelCandidates, submitBatch, getBatch } from './gemini.js';
 
 const GAP_BETWEEN_CALLS_MS = 6000; // stay under free-tier requests per minute (WORK_GAP_MS overrides it in tests)
 const FIRST_BACKOFF_MS = 60_000;
@@ -26,7 +34,7 @@ const METADATA_LIMIT = 1000; // KV allows 1024 bytes
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const emptyWork = () => ({ patches: [], attempts: {}, status: { state: 'idle', note: '', nextAt: 0, failures: 0, updatedAt: 0 } });
+export const emptyWork = () => ({ patches: [], attempts: {}, batches: [], batchModel: '', batchOff: null, status: { state: 'idle', note: '', nextAt: 0, failures: 0, updatedAt: 0 } });
 
 export async function readWork(env) {
   try {
@@ -46,14 +54,15 @@ async function writeWork(env, doc) {
 /** Keep a work list that fits KV metadata. */
 export function clipWorkList(work) {
   if (!Array.isArray(work)) return [];
-  const list = work.filter((w) => typeof w === 'string' && /^[ta]\|[^|]{1,80}\|-?\d{1,12}$/.test(w)).slice(0, 40);
+  const list = work.filter((w) => typeof w === 'string' && /^[taTA]\|[^|]{1,80}\|-?\d{1,12}$/.test(w)).slice(0, 40);
   while (list.length > 0 && JSON.stringify({ work: list }).length > METADATA_LIMIT) list.pop();
   return list;
 }
 
+// "T|id|hash" / "A|..." (capital) are live: translate and annotate now with direct calls. "t" / "a" go in the batch.
 const parseEntry = (entry) => {
-  const [kind, id, hash] = String(entry).split('|');
-  return kind && id && hash ? { kind, id, hash, key: entry } : null;
+  const [letter, id, hash] = String(entry).split('|');
+  return letter && id && hash ? { kind: letter.toLowerCase(), live: letter === letter.toUpperCase(), id, hash, key: entry } : null;
 };
 
 /**
@@ -77,20 +86,231 @@ function backoffFor(failures) {
   return Math.min(FIRST_BACKOFF_MS * 2 ** Math.max(0, failures - 1), MAX_BACKOFF_MS);
 }
 
+const MAX_ACTIVE_BATCHES = 3;
+const BATCH_OFF_MS = 12 * 3600_000; // batch refused for this key: use direct calls for a while
+const batchOffNote = (status) => `The Gemini batch API is not available for this key (status ${status}); using direct calls`;
+
 /**
- * Process waiting work for up to `budgetMs`. Safe to call from cron or on demand.
- * Returns a short description of what happened (used in logs and tests).
+ * Process waiting work. Safe to call from cron or on demand. Returns a short description of what
+ * happened (used in logs and tests).
+ *
+ * The default is Gemini's batch API: the requests of all waiting recipes go in one batch job (half the price,
+ * separate and much roomier limits); a later run collects the answers, which usually take minutes and at most a day.
+ * If Google refuses batches for the key (free-tier keys may batch only the Flash-Lite models) or batch is switched
+ * off (GEMINI_BATCH=off) it falls back to direct calls, one recipe at a time.
  */
-export async function processWork(env, { budgetMs = 20000, log = () => {} } = {}) {
+export async function processWork(env, opts = {}) {
   if (!env.GEMINI_API_KEY) return 'no_key';
+  const log = opts.log || (() => {});
 
-  const entries = await pendingEntries(env);
-  if (entries.length === 0) return 'idle';
-
+  const allEntries = await pendingEntries(env);
   let doc = await readWork(env);
-  const now = Date.now();
-  if (doc.status.nextAt > now) return 'backing_off';
+  if (allEntries.length === 0 && doc.batches.length === 0) return 'idle';
+  if (doc.status.nextAt > Date.now()) return 'backing_off';
 
+  // Live work (recipes you just imported or re-parsed) first, with direct calls: you are waiting for it.
+  // Everything else goes through the batch.
+  const live = allEntries.filter((e) => e.live);
+  const entries = allEntries.filter((e) => !e.live);
+  let liveResult = 'none';
+  if (live.length > 0) {
+    liveResult = await processDirect(env, doc, live, opts);
+    doc = await readWork(env);
+    if (doc.status.nextAt > Date.now()) return liveResult; // rate limited or stopped: the rest waits
+  }
+
+  const batchOn = env.GEMINI_BATCH !== 'off' && !(doc.batchOff && doc.batchOff.until > Date.now());
+  if (entries.length === 0 && doc.batches.length === 0) return liveResult;
+  if (!batchOn && doc.batches.length === 0) {
+    const direct = await processDirect(env, doc, entries, opts);
+    return liveResult !== 'none' && ['nothing_to_do', 'idle', 'skipped'].includes(direct) ? liveResult : direct;
+  }
+
+  // 1. collect finished batches
+  let collected = 'none';
+  if (doc.batches.length > 0) {
+    const polled = await collectBatches(env, doc, log);
+    doc = polled.doc;
+    collected = polled.result;
+    if (doc.status.nextAt > Date.now()) return 'backing_off'; // a batch failed: wait before sending it again
+  }
+
+  // 2. send new work
+  if (!batchOn) return collected === 'none' ? processDirect(env, doc, entries, opts) : collected;
+  const submitted = await submitNewBatch(env, doc, entries, log);
+  if (submitted === 'batch_unavailable') return processDirect(env, await readWork(env), entries, opts);
+  if (submitted !== 'nothing_to_do') return submitted;
+  if (collected !== 'none' && collected !== 'batch_pending') return collected;
+  return doc.batches.length > 0 ? 'batch_pending' : 'nothing_to_do';
+}
+
+// ---- batch ------------------------------------------------------------------------------------------------
+
+const subKeysOf = (entry, recipe) =>
+  entry.kind === 't' ? [entry.key] : [`${entry.key}|nl`, ...(recipe.ingredientSectionsEn && recipe.instructionsEn ? [`${entry.key}|en`] : [])];
+
+const isStillValid = (entry, recipe) =>
+  recipe &&
+  (entry.kind === 't'
+    ? isUntouchedPending(recipe) && contentHash(recipe) === entry.hash
+    : needsAnnotation(recipe) && annotationSource(recipe) === entry.hash);
+
+async function readRecipes(env) {
+  const stateRaw = await env.FEAST.get('state');
+  return stateRaw ? JSON.parse(stateRaw).data?.recipes || [] : [];
+}
+
+/** Look at the batches in flight; turn finished ones into patches. */
+async function collectBatches(env, doc, log) {
+  const remaining = [];
+  const finished = [];
+  let transientError = null;
+
+  for (const batch of doc.batches) {
+    try {
+      const { state, results } = await getBatch(env, batch.name);
+      if (state === 'JOB_STATE_SUCCEEDED') finished.push({ batch, results });
+      else if (['JOB_STATE_FAILED', 'JOB_STATE_CANCELLED', 'JOB_STATE_EXPIRED'].includes(state)) {
+        log('warn', { event: 'batch_failed', name: batch.name, state });
+        doc.status = { state: 'waiting', note: `A Gemini batch ended as ${state.replace('JOB_STATE_', '').toLowerCase()}; its recipes are sent again`, nextAt: Date.now() + backoffFor((doc.status.failures || 0) + 1), failures: (doc.status.failures || 0) + 1, updatedAt: Date.now() };
+        // the items fall out of "in flight" and are sent again in a later batch
+      } else remaining.push(batch);
+    } catch (e) {
+      if (e instanceof GeminiHttpError && e.status === 404) {
+        log('warn', { event: 'batch_gone', name: batch.name }); // expired or deleted on Google's side
+      } else {
+        transientError = e;
+        remaining.push(batch); // keep it, ask again next time
+      }
+    }
+  }
+
+  if (finished.length === 0 && doc.batches.length === remaining.length) {
+    if (transientError) log('warn', { event: 'batch_poll_failed', reason: String(transientError.message || transientError) });
+    return { doc, result: 'batch_pending' }; // still running: nothing to write
+  }
+
+  if (finished.length > 0) {
+    const recipes = await readRecipes(env);
+    doc = await freshCopy(env, doc);
+    for (const { batch, results } of finished) {
+      for (const item of batch.items) {
+        const entry = parseEntry(item.key);
+        if (!entry || doc.patches.some((p) => p.key === entry.key)) continue;
+        const recipe = recipes.find((r) => r.id === entry.id);
+        if (!isStillValid(entry, recipe)) {
+          doc.attempts[entry.key] = MAX_BAD_OUTPUT_ATTEMPTS; // changed since: skip, the app reports it again
+          continue;
+        }
+        try {
+          let result;
+          const answer = (subKey) => {
+            const r = results.get(subKey);
+            if (!r || r.error) throw new Error(r?.error?.message || 'No answer in the batch result');
+            return readJson(r.data);
+          };
+          if (entry.kind === 't') result = parseTranslation(recipe, answer(item.subKeys[0]));
+          else {
+            const main = parseAnnotation(recipe.ingredientSections, recipe.instructions, answer(item.subKeys[0]));
+            const en = item.subKeys[1] ? parseAnnotation(recipe.ingredientSectionsEn, recipe.instructionsEn, answer(item.subKeys[1])) : undefined;
+            result = { main, en };
+          }
+          doc.patches.push({
+            key: entry.key, id: entry.id, kind: entry.kind, hash: entry.hash, label: recipe.title, result,
+            method: `Gemini batch (${batch.model})`, calls: item.subKeys.length,
+            startedAt: batch.submittedAt, endedAt: Date.now(),
+          });
+          log('info', { event: 'work_done', via: 'batch', kind: entry.kind, ms: Date.now() - batch.submittedAt });
+        } catch (e) {
+          const attempts = (doc.attempts[entry.key] || 0) + 1;
+          doc.attempts[entry.key] = attempts;
+          const reason = e instanceof Error ? e.message : String(e);
+          if (attempts >= MAX_BAD_OUTPUT_ATTEMPTS) {
+            doc.patches.push({ key: entry.key, id: entry.id, kind: entry.kind, hash: entry.hash, label: recipe.title, gaveUp: true, error: `${reason} (gave up after ${attempts} attempts)`, startedAt: batch.submittedAt, endedAt: Date.now(), calls: item.subKeys.length });
+          }
+          log('warn', { event: 'work_bad_output', via: 'batch', kind: entry.kind, reason, attempts });
+        }
+      }
+    }
+    doc.status = { state: remaining.length > 0 ? 'waiting' : 'working', note: remaining.length > 0 ? doc.status.note : '', nextAt: 0, failures: 0, updatedAt: Date.now() };
+  }
+
+  doc.batches = remaining;
+  await writeWork(env, doc);
+  return { doc, result: finished.length > 0 ? 'processed' : 'batch_pending' };
+}
+
+/** Put everything that waits (and is not in a batch yet) into a new batch job. */
+async function submitNewBatch(env, doc, entries, log) {
+  if (doc.batches.length >= MAX_ACTIVE_BATCHES) return 'nothing_to_do';
+  const inFlight = new Set(doc.batches.flatMap((b) => b.items.map((i) => i.key)));
+  const todo = entries.filter((e) => !inFlight.has(e.key) && !doc.patches.some((p) => p.key === e.key) && (doc.attempts[e.key] || 0) < MAX_BAD_OUTPUT_ATTEMPTS);
+  if (todo.length === 0) return 'nothing_to_do';
+
+  const recipes = await readRecipes(env);
+  const items = [];
+  const requests = [];
+  for (const entry of todo) {
+    const recipe = recipes.find((r) => r.id === entry.id);
+    if (!isStillValid(entry, recipe)) {
+      doc.attempts[entry.key] = MAX_BAD_OUTPUT_ATTEMPTS;
+      continue;
+    }
+    const subKeys = subKeysOf(entry, recipe);
+    if (entry.kind === 't') requests.push({ key: subKeys[0], body: buildTranslationRequest(recipe) });
+    else {
+      requests.push({ key: subKeys[0], body: buildAnnotationRequest(recipe.ingredientSections, recipe.instructions, 'nl') });
+      if (subKeys[1]) requests.push({ key: subKeys[1], body: buildAnnotationRequest(recipe.ingredientSectionsEn, recipe.instructionsEn, 'en') });
+    }
+    items.push({ key: entry.key, subKeys });
+  }
+  if (requests.length === 0) {
+    await writeWork(env, doc);
+    return 'skipped';
+  }
+
+  const candidates = doc.batchModel ? [doc.batchModel] : await batchModelCandidates(env, log);
+  let lastStatus = 0;
+  for (const model of candidates) {
+    try {
+      const name = await submitBatch(env, model, requests, `feast ${new Date().toISOString().slice(0, 16)}`);
+      doc = await freshCopy(env, doc);
+      doc.batchModel = model;
+      doc.batchOff = null;
+      doc.batches.push({ name, model, submittedAt: Date.now(), items });
+      doc.status = { state: 'waiting', note: `${requests.length} request${requests.length === 1 ? '' : 's'} sent to Gemini's batch queue (${model}); answers usually take minutes, at most a day`, nextAt: 0, failures: 0, updatedAt: Date.now() };
+      await writeWork(env, doc);
+      log('info', { event: 'batch_submitted', model, requests: requests.length, name });
+      return 'submitted';
+    } catch (e) {
+      const kind = classifyGeminiError(e);
+      lastStatus = e instanceof GeminiHttpError ? e.status : 0;
+      log('warn', { event: 'batch_submit_failed', model, status: lastStatus, detail: e.detail, reason: String(e.message || e) });
+      if (kind === 'transient') {
+        // rate limited or Google is down: wait, then try again (not a reason to give up on batches)
+        doc = await freshCopy(env, doc);
+        const failures = (doc.status.failures || 0) + 1;
+        const wait = backoffFor(failures);
+        doc.status = { state: 'waiting', note: `Gemini batch is rate limiting or unavailable (${e.message}); trying again in ${Math.round(wait / 60000)} min`, nextAt: Date.now() + wait, failures, updatedAt: Date.now() };
+        await writeWork(env, doc);
+        return 'rate_limited';
+      }
+      doc.batchModel = ''; // try the next candidate model
+    }
+  }
+
+  // No model accepted a batch: use direct calls for a while
+  doc = await freshCopy(env, doc);
+  doc.batchOff = { until: Date.now() + BATCH_OFF_MS, note: batchOffNote(lastStatus) };
+  await writeWork(env, doc);
+  log('warn', { event: 'batch_unavailable', status: lastStatus });
+  return 'batch_unavailable';
+}
+
+// ---- direct calls (fallback) ------------------------------------------------------------------------------
+
+async function processDirect(env, doc, entries, { budgetMs = 20000, log = () => {} } = {}) {
+  if (entries.length === 0) return 'idle';
   const todo = entries.filter((e) => !doc.patches.some((p) => p.key === e.key) && (doc.attempts[e.key] || 0) < MAX_BAD_OUTPUT_ATTEMPTS);
   if (todo.length === 0) return 'nothing_to_do';
 
