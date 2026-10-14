@@ -214,6 +214,16 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
       createdAt: initialRecipe?.createdAt || new Date().toISOString()
     };
 
+    // Ingredient or step content changed: the plural forms and step quantities must be redone
+    const contentOf = (r: { ingredientSections?: IngredientSection[]; instructions?: InstructionStep[] }) =>
+      JSON.stringify([
+        (r.ingredientSections || []).map((sec) => sec.items.map((i) => [i.id, i.amount, i.unit, i.name])),
+        (r.instructions || []).map((st) => st.text),
+      ]);
+    if (initialRecipe && contentOf(initialRecipe) !== contentOf(recipe)) {
+      recipe = { ...recipe, annotationVersion: undefined };
+    }
+
     if (reparsedRef.current) {
       // New content from the AI: drop the old second language and queue a fresh translation.
       recipe = withPendingTranslation({
@@ -223,6 +233,7 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
         ingredientSectionsEn: undefined,
         instructionsEn: undefined,
         translationVersion: undefined,
+        annotationVersion: undefined,
       });
     }
 

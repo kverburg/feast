@@ -7,6 +7,7 @@ const KIND_LABEL: Record<LogEntry['kind'], string> = {
   import: 'Import',
   translate: 'Translate',
   reparse: 'AI re-parse',
+  annotate: 'Annotate',
 };
 
 const formatTime = (iso: string) =>

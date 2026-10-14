@@ -2,7 +2,7 @@
 // Kept on this device (localStorage) and merged through the worker (/api/activity) so the
 // log is shared across devices. Last 2000 entries.
 
-export type LogKind = 'import' | 'translate' | 'reparse';
+export type LogKind = 'import' | 'translate' | 'reparse' | 'annotate';
 export type LogStatus = 'running' | 'retrying' | 'done' | 'failed';
 
 export interface LogEntry {

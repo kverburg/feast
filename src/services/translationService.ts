@@ -2,6 +2,7 @@ import { Recipe } from '../types/recipe';
 import { translateRecipeWithGemini, isGeminiAvailable, classifyGeminiError, GeminiHttpError } from './geminiService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
 import { startLog, updateLog, finishLog } from './activityLog';
+import { ANNOTATION_VERSION, annotateRecipeVersion, applyAnnotation, VersionAnnotation } from './annotationService';
 
 // ---------------------------------------------------------------------------
 // Translation via Gemini, run as a background queue.
@@ -17,12 +18,18 @@ const MISSING_KEY_MESSAGE =
 const rejectedKeyMessage = (status?: number) =>
   `Gemini rejected the request${status ? ` (status ${status})` : ''}: check the API key in Settings. Recipes stay untranslated until it works.`;
 
-const contentHash = (r: Recipe): string => {
-  const text = JSON.stringify([r.title, r.description, r.ingredientSections, r.instructions]);
+const hashValue = (value: unknown): string => {
+  const text = JSON.stringify(value);
   let h = 5381;
   for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
   return String(h);
 };
+
+const contentHash = (r: Recipe): string => hashValue([r.title, r.description, r.ingredientSections, r.instructions]);
+
+// Everything the annotation depends on, in both languages
+const annotationSource = (r: Recipe): string =>
+  hashValue([r.ingredientSections, r.instructions, r.ingredientSectionsEn, r.instructionsEn]);
 
 /** Mark a freshly imported recipe (any language) as waiting for translation. */
 export function withPendingTranslation(recipe: Recipe): Recipe {
@@ -110,7 +117,87 @@ async function runQueue(): Promise<void> {
       (r) => isUntouchedPending(r) && (badOutputAttempts.get(r.id) ?? 0) < MAX_BAD_OUTPUT_ATTEMPTS
     );
 
-  if (!nextPending()) {
+  const needsAnnotation = (r: Recipe): boolean =>
+    !r.translationPending &&
+    r.annotationVersion !== ANNOTATION_VERSION &&
+    r.ingredientSections.some((sec) => sec.items.length > 0) &&
+    r.instructions.length > 0 &&
+    (badOutputAttempts.get(`annotate:${r.id}`) ?? 0) < MAX_BAD_OUTPUT_ATTEMPTS;
+  const nextToAnnotate = () => getStoredRecipes().find(needsAnnotation);
+
+  // Adds plural forms and step quantities (see annotationService). Returns false to stop the queue.
+  const annotateOne = async (r: Recipe): Promise<boolean> => {
+    const key = `annotate:${r.id}`;
+    let logId = logIds.get(key);
+    if (!logId) {
+      logId = startLog('annotate', r.title, 'Gemini');
+      logIds.set(key, logId);
+    }
+    try {
+      const before = annotationSource(r);
+      const main = await annotateRecipeVersion(r.ingredientSections, r.instructions, 'nl');
+      let en: VersionAnnotation | undefined;
+      if (r.ingredientSectionsEn && r.instructionsEn) {
+        await sleep(GAP_BETWEEN_CALLS_MS);
+        en = await annotateRecipeVersion(r.ingredientSectionsEn, r.instructionsEn, 'en');
+      }
+
+      const latest = getStoredRecipes();
+      const idx = latest.findIndex((x) => x.id === r.id);
+      if (idx === -1 || annotationSource(latest[idx]) !== before) {
+        finishLog(logId, 'done', { detail: 'Skipped: the recipe was edited meanwhile, it will be annotated again' });
+      } else {
+        const current = latest[idx];
+        const nl = applyAnnotation(current.ingredientSections, current.instructions, main);
+        const enApplied =
+          en && current.ingredientSectionsEn && current.instructionsEn
+            ? applyAnnotation(current.ingredientSectionsEn, current.instructionsEn, en)
+            : undefined;
+        latest[idx] = {
+          ...current,
+          ingredientSections: nl.sections,
+          instructions: nl.steps,
+          ...(enApplied ? { ingredientSectionsEn: enApplied.sections, instructionsEn: enApplied.steps } : {}),
+          annotationVersion: ANNOTATION_VERSION,
+        };
+        saveStoredRecipes(latest);
+        changeListeners.forEach((cb) => cb());
+        const refCount = main.refs.reduce((n, step) => n + step.length, 0);
+        finishLog(logId, 'done', { detail: `${main.forms.size} ingredient names, ${refCount} step quantities${en ? ' (both languages)' : ''}` });
+      }
+      logIds.delete(key);
+      setQueueError(null);
+      backoff = FIRST_BACKOFF_MS;
+      await sleep(GAP_BETWEEN_CALLS_MS);
+      return true;
+    } catch (e) {
+      const kind = classifyGeminiError(e);
+      const reason = e instanceof Error ? e.message : String(e);
+      if (kind === 'transient') {
+        updateLog(logId, { status: 'retrying', detail: `${reason}; retrying in ${Math.round(backoff / 1000)}s` });
+        await sleep(backoff);
+        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+        return true;
+      }
+      if (kind === 'other') {
+        const attempts = (badOutputAttempts.get(key) ?? 0) + 1;
+        badOutputAttempts.set(key, attempts);
+        if (attempts >= MAX_BAD_OUTPUT_ATTEMPTS) {
+          finishLog(logId, 'failed', { detail: `${reason} (gave up after ${attempts} attempts)` });
+          logIds.delete(key);
+        } else {
+          updateLog(logId, { status: 'retrying', detail: reason });
+        }
+        return true;
+      }
+      finishLog(logId, 'failed', { detail: kind === 'unavailable' ? 'No Gemini API key' : reason });
+      logIds.delete(key);
+      setQueueError(kind === 'unavailable' ? MISSING_KEY_MESSAGE : rejectedKeyMessage(e instanceof GeminiHttpError ? e.status : undefined));
+      return false;
+    }
+  };
+
+  if (!nextPending() && !nextToAnnotate()) {
     setQueueError(null);
     return;
   }
@@ -122,8 +209,14 @@ async function runQueue(): Promise<void> {
   for (;;) {
     const next = nextPending();
     if (!next) {
-      setQueueError(null);
-      return;
+      // Translations first; once none are waiting, annotate recipes one at a time
+      const toAnnotate = nextToAnnotate();
+      if (!toAnnotate) {
+        setQueueError(null);
+        return;
+      }
+      if (!(await annotateOne(toAnnotate))) return;
+      continue;
     }
 
     let logId = logIds.get(next.id);
