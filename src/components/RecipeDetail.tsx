@@ -1,7 +1,8 @@
 import { localizeRecipe, Language } from '../services/localizeRecipe';
 import React, { useState } from 'react';
 import { Recipe, IngredientItem } from '../types/recipe';
-import { convertCupToMetric } from '../services/unitConverterService';
+import { convertUnit, displayName, formatAmount, formatUnit } from '../services/amounts';
+import { StepText } from './StepText';
 import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, Timer, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
 
 interface RecipeDetailProps {
@@ -13,48 +14,6 @@ interface RecipeDetailProps {
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
   onStartCookMode: (recipe: Recipe, targetServings: number) => void;
   onAddToShoppingList: (items: any[]) => void;
-}
-
-// Convert decimal to nice cooking fraction representation
-function formatAmount(amount: number): string {
-  if (!amount || amount === 0) return '';
-
-  const whole = Math.floor(amount);
-  const remainder = amount - whole;
-
-  let fraction = '';
-  if (Math.abs(remainder - 0.25) < 0.05) fraction = '¼';
-  else if (Math.abs(remainder - 0.33) < 0.05) fraction = '⅓';
-  else if (Math.abs(remainder - 0.5) < 0.05) fraction = '½';
-  else if (Math.abs(remainder - 0.66) < 0.05) fraction = '⅔';
-  else if (Math.abs(remainder - 0.75) < 0.05) fraction = '¾';
-
-  if (fraction) {
-    return whole > 0 ? `${whole} ${fraction}` : fraction;
-  }
-
-  // Format clean decimal up to 2 places
-  return parseFloat(amount.toFixed(2)).toString();
-}
-
-// Metric <-> Imperial conversion helper using ingredient density
-function convertUnit(amount: number, unit: string, system: 'metric' | 'imperial', itemName: string = ''): { amount: number; unit: string } {
-  if (!amount || !unit) return { amount, unit };
-  const u = unit.toLowerCase().trim();
-
-  if (system === 'metric') {
-    if (['cup', 'cups', 'tbsp', 'tsp', 'oz', 'lbs'].includes(u)) {
-      const converted = convertCupToMetric(amount, unit, itemName);
-      return { amount: converted.amount, unit: converted.unit };
-    }
-  } else if (system === 'imperial') {
-    if (u === 'g') return { amount: parseFloat((amount * 0.035274).toFixed(1)), unit: 'oz' };
-    if (u === 'kg') return { amount: parseFloat((amount * 2.20462).toFixed(1)), unit: 'lbs' };
-    if (u === 'ml') return { amount: parseFloat((amount * 0.00422675).toFixed(2)), unit: 'cups' };
-    if (u === 'l') return { amount: parseFloat((amount * 4.22675).toFixed(2)), unit: 'cups' };
-  }
-
-  return { amount, unit };
 }
 
 export const RecipeDetail: React.FC<RecipeDetailProps> = ({
@@ -80,6 +39,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   const [activeTimer, setActiveTimer] = useState<{ stepId: string; secondsLeft: number } | null>(null);
 
   const scaleRatio = currentServings / (recipe.servings || 1);
+  const allItems: IngredientItem[] = (displaySections || []).flatMap((sec) => sec.items);
 
 
   const toggleStepCheck = (id: string) => {
@@ -280,8 +240,8 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                     return (
                       <li key={item.id} className="ingredient-item">
                         <div className="item-details">
-                          <span className="item-amount">{formattedAmt} {converted.unit}</span>
-                          <span className="item-name">{item.name}</span>
+                          <span className="item-amount">{formattedAmt} {formatUnit(converted.unit, converted.amount, language)}</span>
+                          <span className="item-name">{displayName(item, converted.amount, converted.unit)}</span>
                           {item.notes && <span className="item-notes">({item.notes})</span>}
                         </div>
                       </li>
@@ -315,7 +275,13 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                   </div>
 
                   <div className="step-content">
-                    <p className="step-text">{step.text}</p>
+                    <StepText
+                      step={step}
+                      items={allItems}
+                      scaleRatio={scaleRatio}
+                      unitSystem={unitSystem}
+                      language={language}
+                    />
 
                     {step.timerMinutes && (
                       <div className="step-timer-row">

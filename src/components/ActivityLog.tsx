@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, ArrowLeft, Loader2, RotateCcw, X, Trash2, RefreshCw } from 'lucide-react';
 import { LogEntry, clearLog, getLog, pullActivity, subscribeLog } from '../services/activityLog';
+import { QueueStatus, getQueueStatus, subscribeQueueStatus } from '../services/translationService';
 import { ImportJob, dismissImport, getImportJobs, retryImport, subscribeImportJobs } from '../services/importQueue';
 
 const KIND_LABEL: Record<LogEntry['kind'], string> = {
   import: 'Import',
   translate: 'Translate',
   reparse: 'AI re-parse',
+  annotate: 'Annotate',
 };
 
 const formatTime = (iso: string) =>
@@ -29,14 +31,18 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack }) => {
   const [jobs, setJobs] = useState<ImportJob[]>(getImportJobs());
   const [shown, setShown] = useState(PAGE_SIZE);
   const [refreshing, setRefreshing] = useState(false);
+  const [queue, setQueue] = useState<QueueStatus>(getQueueStatus());
 
   useEffect(() => {
     const unsubscribeLog = subscribeLog(() => setEntries([...getLog()]));
     const unsubscribeJobs = subscribeImportJobs(() => setJobs([...getImportJobs()]));
+    const unsubscribeQueue = subscribeQueueStatus(() => setQueue(getQueueStatus()));
+    setQueue(getQueueStatus());
     void pullActivity(); // bring in what other devices logged
     return () => {
       unsubscribeLog();
       unsubscribeJobs();
+      unsubscribeQueue();
     };
   }, []);
 
@@ -61,6 +67,25 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack }) => {
         Imports, translations and AI re-parses: when they started, what was used and how they ended. Shared across your
         devices (last 2000).
       </p>
+
+      {(queue.translating > 0 || queue.annotating > 0 || queue.state !== 'idle') && (
+        <div className={`activity-queue ${queue.state}`}>
+          <strong>Background queue</strong>
+          <span>
+            {queue.state === 'working' && 'Working…'}
+            {queue.state === 'waiting' && 'Waiting'}
+            {queue.state === 'stopped' && 'Stopped'}
+            {queue.state === 'idle' && 'Idle'}
+          </span>
+          {queue.translating > 0 && <div>Translating {queue.translating} recipe{queue.translating === 1 ? '' : 's'}</div>}
+          {queue.annotating > 0 && (
+            <div>
+              Adding plural names and step quantities to {queue.annotating} recipe{queue.annotating === 1 ? '' : 's'}
+            </div>
+          )}
+          {queue.note && <div className="activity-detail">{queue.note}</div>}
+        </div>
+      )}
 
       {jobs.length > 0 && (
         <div className="activity-jobs">
@@ -145,6 +170,10 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack }) => {
         .activity-page .settings-card { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
         .activity-page .card-sec-header { display: flex; align-items: center; gap: 0.6rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; }
         .activity-page .setting-desc { font-size: 0.84rem; color: var(--text-muted); }
+        .activity-queue { display: flex; flex-direction: column; gap: 0.2rem; margin: 1rem 0 0; padding: 0.7rem 0.85rem; background: var(--bg-input); border: 1px solid var(--border-color); border-left: 4px solid var(--accent-primary); border-radius: var(--radius-md); font-size: 0.88rem; }
+        .activity-queue.stopped { border-left-color: #ef4444; }
+        .activity-queue.waiting { border-left-color: #f59e0b; }
+        .activity-queue > span { color: var(--text-muted); font-size: 0.8rem; }
         .activity-jobs { display: flex; flex-direction: column; gap: 0.5rem; margin: 1rem 0; }
         .activity-jobs h4 { font-size: 0.9rem; color: var(--text-muted); }
         .activity-job {

@@ -4,6 +4,10 @@ export interface IngredientItem {
   unit: string;
   name: string;
   notes?: string;
+  // Singular and plural form of the name (filled in by the annotation pass), so the list can say
+  // "1 ui" or "2 uien" when the portions change
+  nameSingular?: string;
+  namePlural?: string;
 }
 
 export interface IngredientSection {
@@ -12,11 +16,19 @@ export interface IngredientSection {
   items: IngredientItem[];
 }
 
+// A place in a step's text where an ingredient is used; the step shows its (scaled) amount there
+export interface StepRef {
+  ingredientId: string;
+  mention: string; // exact words in the step text, e.g. "de uien"
+  fraction?: number; // share of the ingredient's amount used in this step (default 1)
+}
+
 export interface InstructionStep {
   id: string;
   stepNumber: number;
   text: string;
   timerMinutes?: number;
+  refs?: StepRef[];
 }
 
 export interface Recipe {
@@ -43,6 +55,8 @@ export interface Recipe {
   instructionsEn?: InstructionStep[];
   // 2 = Dutch text was written by the Gemini translation
   translationVersion?: number;
+  // 1 = plural forms and step references were added (see annotationService)
+  annotationVersion?: number;
   // True while the recipe waits in the translation queue (Dutch -> English, anything else -> Dutch)
   translationPending?: boolean;
   // Fingerprint of the content when it was queued, to notice hand edits while waiting

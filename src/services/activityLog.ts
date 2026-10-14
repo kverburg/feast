@@ -4,7 +4,7 @@
 
 import { reportEvent } from './telemetry';
 
-export type LogKind = 'import' | 'translate' | 'reparse';
+export type LogKind = 'import' | 'translate' | 'reparse' | 'annotate';
 export type LogStatus = 'running' | 'retrying' | 'done' | 'failed';
 
 export interface LogEntry {

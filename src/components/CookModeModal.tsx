@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { StepText } from './StepText';
+import { convertUnit, displayName, formatUnit } from '../services/amounts';
 import { Recipe } from '../types/recipe';
 import { voiceAssistant, VoiceCommand } from '../services/voiceAssistantService';
 import { X, ChevronLeft, ChevronRight, Play, Pause, RotateCcw, Timer, Users, Layers, CheckCircle2, Mic, MicOff, Volume2, VolumeX, Sparkles, MessageSquare } from 'lucide-react';
@@ -305,13 +307,13 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
                   <h4 className="drawer-sec-title">{sec.title}</h4>
                   <ul className="drawer-ing-list">
                     {sec.items.map((item) => {
-                      const scaledAmt = (item.amount || 0) * scaleRatio;
+                      const shown = convertUnit((item.amount || 0) * scaleRatio, item.unit, 'metric', item.name);
                       return (
                         <li key={item.id} className="drawer-ing-item">
                           <span className="drawer-ing-amt">
-                            {parseFloat(scaledAmt.toFixed(2))} {item.unit}
+                            {parseFloat(shown.amount.toFixed(2))} {formatUnit(shown.unit, shown.amount, language)}
                           </span>
-                          <span>{item.name}</span>
+                          <span>{displayName(item, shown.amount, shown.unit)}</span>
                         </li>
                       );
                     })}
@@ -353,7 +355,14 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
               </div>
 
               <div className="step-main-text">
-                <p>{currentStep.text}</p>
+                <StepText
+                  step={currentStep}
+                  items={displaySections?.flatMap((sec) => sec.items) || []}
+                  scaleRatio={scaleRatio}
+                  unitSystem="metric"
+                  language={language}
+                  className=""
+                />
               </div>
 
               {/* Timer Block */}

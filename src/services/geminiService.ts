@@ -199,6 +199,16 @@ Rules:
   return parsed;
 }
 
+/** One prompt in, one parsed JSON object out. Throws like the other Gemini calls. */
+export async function geminiJson(prompt: string): Promise<any> {
+  const data = await geminiGenerate({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+  });
+  const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+}
+
 export interface GeminiTranslation {
   // 'nl' when the source recipe was Dutch (translated to English); 'other' otherwise (translated to Dutch)
   sourceLanguage: 'nl' | 'other';
