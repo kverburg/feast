@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, Loader2, RotateCcw, X, Trash2, RefreshCw } from 'lucide-react';
+import { Activity, ArrowLeft, Loader2, RotateCcw, X, Trash2, RefreshCw } from 'lucide-react';
 import { LogEntry, clearLog, getLog, pullActivity, subscribeLog } from '../services/activityLog';
 import { ImportJob, dismissImport, getImportJobs, retryImport, subscribeImportJobs } from '../services/importQueue';
 
@@ -20,7 +20,11 @@ const formatDuration = (entry: LogEntry): string => {
 
 const PAGE_SIZE = 100;
 
-export const ActivityLog: React.FC = () => {
+interface ActivityLogProps {
+  onBack: () => void;
+}
+
+export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack }) => {
   const [entries, setEntries] = useState<LogEntry[]>(getLog());
   const [jobs, setJobs] = useState<ImportJob[]>(getImportJobs());
   const [shown, setShown] = useState(PAGE_SIZE);
@@ -43,6 +47,11 @@ export const ActivityLog: React.FC = () => {
   };
 
   return (
+    <div className="activity-page">
+      <button className="btn btn-secondary btn-sm activity-back" onClick={onBack}>
+        <ArrowLeft size={16} />
+        <span>Settings</span>
+      </button>
     <div className="settings-card card">
       <div className="card-sec-header">
         <Activity size={20} color="var(--accent-primary)" />
@@ -128,7 +137,14 @@ export const ActivityLog: React.FC = () => {
         </div>
       )}
 
+      </div>
+
       <style>{`
+        .activity-page { display: flex; flex-direction: column; gap: 1rem; }
+        .activity-back { align-self: flex-start; }
+        .activity-page .settings-card { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+        .activity-page .card-sec-header { display: flex; align-items: center; gap: 0.6rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; }
+        .activity-page .setting-desc { font-size: 0.84rem; color: var(--text-muted); }
         .activity-jobs { display: flex; flex-direction: column; gap: 0.5rem; margin: 1rem 0; }
         .activity-jobs h4 { font-size: 0.9rem; color: var(--text-muted); }
         .activity-job {
@@ -139,7 +155,7 @@ export const ActivityLog: React.FC = () => {
         .activity-job-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
         .activity-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 1rem 0 0.5rem; gap: 0.5rem; flex-wrap: wrap; }
         .activity-toolbar-buttons { display: flex; gap: 0.5rem; }
-        .activity-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 480px; overflow-y: auto; }
+        .activity-list { display: flex; flex-direction: column; gap: 0.5rem; }
         .activity-row { padding: 0.6rem 0.75rem; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.88rem; }
         .activity-row.failed { border-color: rgba(239, 68, 68, 0.45); }
         .activity-main { display: flex; align-items: center; gap: 0.5rem; }

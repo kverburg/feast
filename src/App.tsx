@@ -26,6 +26,7 @@ import { Meals } from './components/Meals';
 import { startTranslationQueue, subscribeTranslationChange, subscribeTranslationError } from './services/translationService';
 import { ErrorBanner } from './components/ErrorBanner';
 import { Toasts } from './components/Toasts';
+import { ActivityLog } from './components/ActivityLog';
 import { showToast } from './services/toast';
 import { getImportJobs, startImportQueue, subscribeImportEvents, subscribeImportJobs } from './services/importQueue';
 import { pullActivity } from './services/activityLog';
@@ -39,6 +40,7 @@ export function App() {
   const [importCounts, setImportCounts] = useState({ busy: 0, failed: 0 });
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [currentTab, setCurrentTab] = useState<'recipes' | 'meals' | 'shopping' | 'settings'>('recipes');
+  const [settingsSub, setSettingsSub] = useState<'activity' | null>(null); // sub page of Settings
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals & Overlay States
@@ -62,6 +64,7 @@ export function App() {
     tab: Tab;
     recipeId: string | null;
     modal: 'form' | 'import' | 'cook' | null;
+    sub: 'activity' | null;
   }
   interface HistoryEntry {
     nav: NavState;
@@ -72,6 +75,7 @@ export function App() {
     tab: currentTab,
     recipeId: selectedRecipe?.id ?? null,
     modal: isFormOpen ? 'form' : isImportOpen ? 'import' : cookModeState ? 'cook' : null,
+    sub: currentTab === 'settings' ? settingsSub : null,
   };
   const navKey = JSON.stringify(nav);
   const initialHashRef = useRef(window.location.hash); // read before the history effect rewrites the URL
@@ -84,7 +88,8 @@ export function App() {
   const recipesRef = useRef<Recipe[]>([]);
   recipesRef.current = recipes;
 
-  const hashFor = (n: NavState) => (n.recipeId ? `#/recipe/${n.recipeId}` : n.tab === 'recipes' ? '#/' : `#/${n.tab}`);
+  const hashFor = (n: NavState) =>
+    n.recipeId ? `#/recipe/${n.recipeId}` : n.tab === 'recipes' ? '#/' : n.sub ? `#/${n.tab}/${n.sub}` : `#/${n.tab}`;
 
   // State -> history: new views push an entry; going back to the previous view uses history.back()
   useEffect(() => {
@@ -117,12 +122,18 @@ export function App() {
   // History -> state: Back/Forward
   useEffect(() => {
     const onPopState = (e: PopStateEvent) => {
-      const target: NavState = (e.state as HistoryEntry | null)?.nav ?? { tab: 'recipes', recipeId: null, modal: null };
+      const target: NavState = (e.state as HistoryEntry | null)?.nav ?? { tab: 'recipes', recipeId: null, modal: null, sub: null };
       const recipe = target.recipeId ? recipesRef.current.find((r) => r.id === target.recipeId) ?? null : null;
       // Forms and cook mode need data that history cannot restore, so they close; the import dialog reopens.
-      const applied: NavState = { tab: target.tab, recipeId: recipe?.id ?? null, modal: target.modal === 'import' ? 'import' : null };
+      const applied: NavState = {
+        tab: target.tab,
+        recipeId: recipe?.id ?? null,
+        modal: target.modal === 'import' ? 'import' : null,
+        sub: target.tab === 'settings' ? target.sub ?? null : null,
+      };
       expectNav(JSON.stringify(applied));
       setCurrentTab(applied.tab);
+      setSettingsSub(applied.sub);
       setSelectedRecipe(recipe);
       setIsImportOpen(applied.modal === 'import');
       setIsFormOpen(false);
@@ -145,18 +156,24 @@ export function App() {
     // Opened on a deep link (#/recipe/<id> or #/meals ...): the list stays one Back away
     const hash = initialHashRef.current;
     const recipeMatch = hash.match(/^#\/recipe\/(.+)$/);
-    const tabMatch = hash.match(/^#\/(meals|shopping|settings)$/);
+    const tabMatch = hash.match(/^#\/(meals|shopping|settings(?:\/activity)?)$/);
     const deepRecipe = recipeMatch ? loadedRecipes.find((r) => r.id === decodeURIComponent(recipeMatch[1])) : undefined;
     if ((deepRecipe || tabMatch) && !deepLinkHandledRef.current) {
       deepLinkHandledRef.current = true;
-      const listNav: NavState = { tab: 'recipes', recipeId: null, modal: null };
+      const listNav: NavState = { tab: 'recipes', recipeId: null, modal: null, sub: null };
       const target: NavState = deepRecipe
-        ? { tab: 'recipes', recipeId: deepRecipe.id, modal: null }
-        : { tab: tabMatch![1] as Tab, recipeId: null, modal: null };
+        ? { tab: 'recipes', recipeId: deepRecipe.id, modal: null, sub: null }
+        : {
+            tab: tabMatch![1].split('/')[0] as Tab,
+            recipeId: null,
+            modal: null,
+            sub: tabMatch![1].endsWith('/activity') ? 'activity' : null,
+          };
       window.history.replaceState({ nav: listNav, idx: 0, prevKey: null } as HistoryEntry, '', '#/');
       window.history.pushState({ nav: target, idx: 1, prevKey: JSON.stringify(listNav) } as HistoryEntry, '', hashFor(target));
       expectNav(JSON.stringify(target));
       setCurrentTab(target.tab);
+      setSettingsSub(target.sub);
       if (deepRecipe) setSelectedRecipe(deepRecipe);
     }
 
@@ -203,6 +220,7 @@ export function App() {
           actionLabel: 'Details',
           onAction: () => {
             setCurrentTab('settings');
+            setSettingsSub('activity');
             setSelectedRecipe(null);
           },
         });
@@ -315,6 +333,7 @@ export function App() {
         currentTab={currentTab}
         setCurrentTab={(tab) => {
           setCurrentTab(tab);
+          setSettingsSub(null);
           setSelectedRecipe(null);
         }}
         searchQuery={searchQuery}
@@ -328,6 +347,7 @@ export function App() {
         importFailed={importCounts.failed}
         onOpenActivity={() => {
           setCurrentTab('settings');
+          setSettingsSub('activity');
           setSelectedRecipe(null);
         }}
       />
@@ -338,6 +358,7 @@ export function App() {
           actionLabel="Open Settings"
           onAction={() => {
             setCurrentTab('settings');
+            setSettingsSub(null);
             setSelectedRecipe(null);
           }}
         />
@@ -388,8 +409,13 @@ export function App() {
           />
         )}
 
-        {currentTab === 'settings' && (
+        {currentTab === 'settings' && settingsSub === 'activity' && (
+          <ActivityLog onBack={() => setSettingsSub(null)} />
+        )}
+
+        {currentTab === 'settings' && settingsSub !== 'activity' && (
           <SettingsModal
+            onOpenActivityLog={() => setSettingsSub('activity')}
             recipes={recipes}
             onImportBackup={(newRecipes) => {
               setRecipes(newRecipes);
