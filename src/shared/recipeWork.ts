@@ -17,9 +17,12 @@ export const contentHash = (r: Recipe): string => hashValue([r.title, r.descript
 export const annotationSource = (r: Recipe): string =>
   hashValue([r.ingredientSections, r.instructions, r.ingredientSectionsEn, r.instructionsEn]);
 
-/** Mark a freshly imported recipe (any language) as waiting for translation. */
-export function withPendingTranslation(recipe: Recipe): Recipe {
-  return { ...recipe, translationPending: true, translationSourceHash: contentHash(recipe) };
+/**
+ * Mark a freshly imported recipe (any language) as waiting for translation. `live`: you just added it and want it done
+ * now, so the server translates and annotates it with direct calls instead of the (slower) background batch.
+ */
+export function withPendingTranslation(recipe: Recipe, live = false): Recipe {
+  return { ...recipe, translationPending: true, translationSourceHash: contentHash(recipe), liveWork: live || undefined };
 }
 
 // Still exactly as queued, so translating it loses nothing. Recipes queued by an older version
@@ -42,7 +45,7 @@ export const needsAnnotation = (r: Recipe): boolean =>
 
 /**
  * The work list the worker uses, as short strings ("t|<recipe id>|<hash>" for a translation, "a|..." for an
- * annotation). It travels as KV metadata (max 1024 bytes), so only as many as fit; the rest follow once these are done.
+ * annotation; a capital letter, "T" and "A", means live: do it now with direct calls, not in the batch). It travels as KV metadata (max 1024 bytes), so only as many as fit; the rest follow once these are done.
  */
 export function computeWorkList(recipes: Recipe[], maxBytes = 900): string[] {
   const list: string[] = [];
@@ -53,8 +56,10 @@ export function computeWorkList(recipes: Recipe[], maxBytes = 900): string[] {
     size += entry.length + 3;
     return true;
   };
-  for (const r of recipes) if (isUntouchedPending(r) && !add(`t|${r.id}|${contentHash(r)}`)) return list;
-  for (const r of recipes) if (needsAnnotation(r) && !add(`a|${r.id}|${annotationSource(r)}`)) return list;
+  // live ones first, so they are never squeezed out of the 1 KB list
+  const ordered = [...recipes.filter((r) => r.liveWork), ...recipes.filter((r) => !r.liveWork)];
+  for (const r of ordered) if (isUntouchedPending(r) && !add(`${r.liveWork ? 'T' : 't'}|${r.id}|${contentHash(r)}`)) return list;
+  for (const r of ordered) if (needsAnnotation(r) && !add(`${r.liveWork ? 'A' : 'a'}|${r.id}|${annotationSource(r)}`)) return list;
   return list;
 }
 
@@ -101,5 +106,6 @@ export function applyAnnotationResult(current: Recipe, main: AnnotationResult, e
     instructions: nl.steps,
     ...(enApplied ? { ingredientSectionsEn: enApplied.sections, instructionsEn: enApplied.steps } : {}),
     annotationVersion: ANNOTATION_VERSION,
+    liveWork: undefined,
   };
 }

@@ -54,14 +54,15 @@ async function writeWork(env, doc) {
 /** Keep a work list that fits KV metadata. */
 export function clipWorkList(work) {
   if (!Array.isArray(work)) return [];
-  const list = work.filter((w) => typeof w === 'string' && /^[ta]\|[^|]{1,80}\|-?\d{1,12}$/.test(w)).slice(0, 40);
+  const list = work.filter((w) => typeof w === 'string' && /^[taTA]\|[^|]{1,80}\|-?\d{1,12}$/.test(w)).slice(0, 40);
   while (list.length > 0 && JSON.stringify({ work: list }).length > METADATA_LIMIT) list.pop();
   return list;
 }
 
+// "T|id|hash" / "A|..." (capital) are live: translate and annotate now with direct calls. "t" / "a" go in the batch.
 const parseEntry = (entry) => {
-  const [kind, id, hash] = String(entry).split('|');
-  return kind && id && hash ? { kind, id, hash, key: entry } : null;
+  const [letter, id, hash] = String(entry).split('|');
+  return letter && id && hash ? { kind: letter.toLowerCase(), live: letter === letter.toUpperCase(), id, hash, key: entry } : null;
 };
 
 /**
@@ -102,13 +103,28 @@ export async function processWork(env, opts = {}) {
   if (!env.GEMINI_API_KEY) return 'no_key';
   const log = opts.log || (() => {});
 
-  const entries = await pendingEntries(env);
+  const allEntries = await pendingEntries(env);
   let doc = await readWork(env);
-  if (entries.length === 0 && doc.batches.length === 0) return 'idle';
+  if (allEntries.length === 0 && doc.batches.length === 0) return 'idle';
   if (doc.status.nextAt > Date.now()) return 'backing_off';
 
+  // Live work (recipes you just imported or re-parsed) first, with direct calls: you are waiting for it.
+  // Everything else goes through the batch.
+  const live = allEntries.filter((e) => e.live);
+  const entries = allEntries.filter((e) => !e.live);
+  let liveResult = 'none';
+  if (live.length > 0) {
+    liveResult = await processDirect(env, doc, live, opts);
+    doc = await readWork(env);
+    if (doc.status.nextAt > Date.now()) return liveResult; // rate limited or stopped: the rest waits
+  }
+
   const batchOn = env.GEMINI_BATCH !== 'off' && !(doc.batchOff && doc.batchOff.until > Date.now());
-  if (!batchOn && doc.batches.length === 0) return processDirect(env, doc, entries, opts);
+  if (entries.length === 0 && doc.batches.length === 0) return liveResult;
+  if (!batchOn && doc.batches.length === 0) {
+    const direct = await processDirect(env, doc, entries, opts);
+    return liveResult !== 'none' && ['nothing_to_do', 'idle', 'skipped'].includes(direct) ? liveResult : direct;
+  }
 
   // 1. collect finished batches
   let collected = 'none';

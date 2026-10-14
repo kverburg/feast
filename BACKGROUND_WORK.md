@@ -15,8 +15,16 @@ Translating a recipe and annotating it (plural names, quantities in steps) keeps
 
 Without a server key (local `npm run dev`, or only a key typed into Settings) the app does the work itself, as before.
 
-## Gemini batch API (the default for background work)
-Background work is not urgent, so it uses the batch API: asynchronous, half the price and with limits of its own, separate from the
+## Live or batch
+- **Live:** a recipe you just **imported** (URL, pasted text, photo) or **re-parsed with AI** is translated and then annotated right away with
+  direct Gemini calls, on the server, so it is done within about a minute. These show up in the work list with a capital letter (`T|`, `A|`)
+  and carry `liveWork` on the recipe until the annotation is applied.
+- **Batch:** everything else (recipes that were already there, the Cookmate XML import with its hundreds of recipes, recipes edited later) goes
+  through the batch API below.
+- A run handles live work first; if a live call is rate limited, the batch part waits for the same backoff.
+
+## Gemini batch API (for the backlog)
+The backlog is not urgent, so it uses the batch API: asynchronous, half the price and with limits of its own, separate from the
 interactive calls that were running into rate limits.
 - All waiting recipes go into **one batch job** (translation: 1 request per recipe, annotation: 1 per language version). Answers usually
   come within minutes and at the latest after a day. Each cron run polls the job (no writes while it is still running), and when it has
