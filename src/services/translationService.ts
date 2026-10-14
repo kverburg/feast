@@ -2,7 +2,15 @@ import { Recipe } from '../types/recipe';
 import { translateRecipeWithGemini, isGeminiAvailable, classifyGeminiError, GeminiHttpError } from './geminiService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
 import { startLog, updateLog, finishLog } from './activityLog';
-import { ANNOTATION_VERSION, annotateRecipeVersion, applyAnnotation, VersionAnnotation } from './annotationService';
+import { annotateRecipeVersion, VersionAnnotation } from './annotationService';
+import {
+  annotationSource,
+  applyAnnotationResult,
+  applyTranslationResult,
+  isUntouchedPending,
+  needsAnnotation,
+  withPendingTranslation,
+} from '../shared/recipeWork';
 
 // ---------------------------------------------------------------------------
 // Translation via Gemini, run as a background queue.
@@ -18,34 +26,7 @@ const MISSING_KEY_MESSAGE =
 const rejectedKeyMessage = (status?: number) =>
   `Gemini rejected the request${status ? ` (status ${status})` : ''}: check the API key in Settings. Recipes stay untranslated until it works.`;
 
-const hashValue = (value: unknown): string => {
-  const text = JSON.stringify(value);
-  let h = 5381;
-  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
-  return String(h);
-};
-
-const contentHash = (r: Recipe): string => hashValue([r.title, r.description, r.ingredientSections, r.instructions]);
-
-// Everything the annotation depends on, in both languages
-const annotationSource = (r: Recipe): string =>
-  hashValue([r.ingredientSections, r.instructions, r.ingredientSectionsEn, r.instructionsEn]);
-
-/** Mark a freshly imported recipe (any language) as waiting for translation. */
-export function withPendingTranslation(recipe: Recipe): Recipe {
-  return { ...recipe, translationPending: true, translationSourceHash: contentHash(recipe) };
-}
-
-// Still exactly as queued, so translating it loses nothing. Recipes queued by an older version
-// carry an English copy in the *En fields instead of a hash.
-const isUntouchedPending = (r: Recipe): boolean => {
-  if (!r.translationPending) return false;
-  if (r.translationSourceHash) return contentHash(r) === r.translationSourceHash;
-  return (
-    JSON.stringify([r.title, r.ingredientSections, r.instructions]) ===
-    JSON.stringify([r.titleEn, r.ingredientSectionsEn, r.instructionsEn])
-  );
-};
+export { withPendingTranslation };
 
 const GAP_BETWEEN_CALLS_MS = 6000; // stay under free-tier requests-per-minute
 const FIRST_BACKOFF_MS = 60_000;
@@ -72,11 +53,7 @@ function setState(state: QueueStatus['state'], note?: string) {
 }
 
 const needsAnnotationNow = (r: Recipe): boolean =>
-  !r.translationPending &&
-  r.annotationVersion !== ANNOTATION_VERSION &&
-  r.ingredientSections.some((sec) => sec.items.length > 0) &&
-  r.instructions.length > 0 &&
-  (badOutputAttempts.get(`annotate:${r.id}`) ?? 0) < MAX_BAD_OUTPUT_ATTEMPTS;
+  needsAnnotation(r) && (badOutputAttempts.get(`annotate:${r.id}`) ?? 0) < MAX_BAD_OUTPUT_ATTEMPTS;
 
 /** What the background queue is doing and how much is waiting (shown on the activity page). */
 export function getQueueStatus(): QueueStatus {
@@ -190,24 +167,12 @@ async function runQueue(): Promise<void> {
       if (idx === -1 || annotationSource(latest[idx]) !== before) {
         finishLog(logId, 'done', { detail: 'Skipped: the recipe was edited meanwhile, it will be annotated again' });
       } else {
-        const current = latest[idx];
-        const nl = applyAnnotation(current.ingredientSections, current.instructions, main);
-        const enApplied =
-          en && current.ingredientSectionsEn && current.instructionsEn
-            ? applyAnnotation(current.ingredientSectionsEn, current.instructionsEn, en)
-            : undefined;
-        latest[idx] = {
-          ...current,
-          ingredientSections: nl.sections,
-          instructions: nl.steps,
-          ...(enApplied ? { ingredientSectionsEn: enApplied.sections, instructionsEn: enApplied.steps } : {}),
-          annotationVersion: ANNOTATION_VERSION,
-        };
+        latest[idx] = applyAnnotationResult(latest[idx], main, en);
         saveStoredRecipes(latest);
         changeListeners.forEach((cb) => cb());
         notifyStatus();
         const refCount = main.refs.reduce((n, step) => n + step.length, 0);
-        finishLog(logId, 'done', { detail: `${main.forms.size} ingredient names, ${refCount} step quantities${en ? ' (both languages)' : ''}` });
+        finishLog(logId, 'done', { detail: `${Object.keys(main.forms).length} ingredient names, ${refCount} step quantities${en ? ' (both languages)' : ''}` });
       }
       logIds.delete(key);
       setQueueError(null);
@@ -277,33 +242,7 @@ async function runQueue(): Promise<void> {
       const latest = getStoredRecipes();
       const idx = latest.findIndex((r) => r.id === next.id);
       if (idx !== -1 && isUntouchedPending(latest[idx])) {
-        const current = latest[idx];
-        const translated = {
-          title: result.title,
-          description: result.description,
-          ingredientSections: result.ingredientSections,
-          instructions: result.instructions,
-        };
-        const original = {
-          title: current.title,
-          description: current.description,
-          ingredientSections: current.ingredientSections,
-          instructions: current.instructions,
-        };
-        // Dutch source: keep it as is and store the translation as the English version.
-        // Anything else: the translation becomes the Dutch main text, the original the English one.
-        const [dutch, english] = result.sourceLanguage === 'nl' ? [original, translated] : [translated, original];
-        latest[idx] = {
-          ...current,
-          ...dutch,
-          titleEn: english.title,
-          descriptionEn: english.description,
-          ingredientSectionsEn: english.ingredientSections,
-          instructionsEn: english.instructions,
-          translationVersion: 2,
-          translationPending: false,
-          translationSourceHash: undefined,
-        };
+        latest[idx] = applyTranslationResult(latest[idx], result);
         saveStoredRecipes(latest);
         changeListeners.forEach((cb) => cb());
         notifyStatus();

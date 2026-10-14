@@ -1,37 +1,22 @@
 import { Recipe, IngredientSection, InstructionStep } from '../types/recipe';
+import { translateRecipe, GeminiTranslation, GeminiTier } from '../shared/geminiTasks';
 
 import { getStoredApiKey } from './storageService';
 
-export class GeminiHttpError extends Error {
-  constructor(public status: number) {
-    super(`Gemini API returned status ${status}`);
-  }
-}
-
-// transient: worth retrying later (rate limit, server hiccup, offline); fatal: retrying will not help
-// until something changes (bad key, bad request); unavailable: no key anywhere; other: bad model output.
-export type GeminiErrorKind = 'transient' | 'fatal' | 'unavailable' | 'other';
-
-export const classifyGeminiError = (e: unknown): GeminiErrorKind => {
-  if (e instanceof GeminiUnavailableError) return 'unavailable';
-  if (e instanceof GeminiHttpError) return e.status === 429 || e.status >= 500 ? 'transient' : 'fatal';
-  if (e instanceof TypeError) return 'transient'; // fetch failed: offline or blocked
-  return 'other';
-};
-
-// Thrown when there is no key to use: none saved in Settings and none configured on the server.
-export class GeminiUnavailableError extends Error {}
+export { GeminiHttpError, GeminiUnavailableError, classifyGeminiError } from '../shared/geminiErrors';
+export type { GeminiErrorKind } from '../shared/geminiErrors';
+import { GeminiHttpError, GeminiUnavailableError } from '../shared/geminiErrors';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_MODEL = 'gemini-flash-latest';
 // Lighter model for tasks that tolerate it (annotation); limits are counted per model. Mirrors worker/gemini.js.
 const GEMINI_MODEL_LIGHT = 'gemini-flash-lite-latest';
 
-export type GeminiTier = 'default' | 'light';
+export type { GeminiTier } from '../shared/geminiTasks';
 
 // A key saved in Settings is used directly; otherwise requests go through the worker's
 // /api/gemini proxy, which holds the shared key as a Cloudflare secret.
-async function geminiGenerate(body: unknown, tier: GeminiTier = 'default'): Promise<any> {
+export async function geminiGenerate(body: unknown, tier: GeminiTier = 'default'): Promise<any> {
   const key = getStoredApiKey();
   let res: Response;
   if (key) {
@@ -222,80 +207,9 @@ export async function geminiJson(prompt: string, tier: GeminiTier = 'default'): 
   return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
 }
 
-export interface GeminiTranslation {
-  // 'nl' when the source recipe was Dutch (translated to English); 'other' otherwise (translated to Dutch)
-  sourceLanguage: 'nl' | 'other';
-  title: string;
-  description: string;
-  ingredientSections: IngredientSection[];
-  instructions: InstructionStep[];
-}
+export type { GeminiTranslation } from '../shared/geminiTasks';
 
-// Translate a whole recipe in one call: Dutch recipes go to English, everything else goes to Dutch.
-// Structure, amounts and timers come from the original; only wording (and unit labels such as
-// cloves <-> teentjes) is taken from the model.
-export async function translateRecipeWithGemini(
-  recipe: Partial<Recipe>
-): Promise<GeminiTranslation> {
-  const source = {
-    title: recipe.title || '',
-    description: recipe.description || '',
-    ingredientSections: (recipe.ingredientSections || []).map((s) => ({
-      title: s.title,
-      items: s.items.map((i) => ({ amount: i.amount, unit: i.unit, name: i.name, notes: i.notes ?? null })),
-    })),
-    instructions: (recipe.instructions || []).map((st) => ({ text: st.text })),
-  };
-
-  const prompt = `Below is a recipe. First decide whether it is written in Dutch.
-- If it is Dutch, translate it into natural English, the way a good English cookbook would write it.
-- Otherwise (English or any other language), translate it into natural Dutch, the way a good Dutch cookbook would write it.
-Rules:
-- Natural, fluent text for home cooks. Use the usual cooking terms of the target language; do not translate word by word.
-- Ingredient names: normal names of the target language, lowercase unless a proper noun (e.g. "Parmigiano-Reggiano"). Keep brand names.
-- Units: use the target language's usual abbreviations or words (Dutch: g, kg, ml, l, el, tl, teentje/teentjes, snufje, stuk/stuks, bosje; English: g, kg, ml, l, tbsp, tsp, clove/cloves, pinch, piece/pieces, bunch). Do not convert amounts or switch unit systems.
-- Keep every number, the number of sections, items and steps, and their order exactly as given. Do not add or remove anything.
-- Respond ONLY with JSON of exactly the same shape as the input ("notes" stays null when it is null), plus one extra field "sourceLanguage": "nl" if the source recipe was Dutch, otherwise "other".
-
-Recipe JSON:
-${JSON.stringify(source)}`;
-
-  const data = await geminiGenerate({
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
-  });
-  const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const out = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
-
-  const sections = recipe.ingredientSections || [];
-  const steps = recipe.instructions || [];
-  const valid =
-    typeof out.title === 'string' &&
-    (out.sourceLanguage === 'nl' || out.sourceLanguage === 'other') &&
-    Array.isArray(out.ingredientSections) &&
-    out.ingredientSections.length === sections.length &&
-    out.ingredientSections.every((s: any, i: number) => Array.isArray(s.items) && s.items.length === sections[i].items.length) &&
-    Array.isArray(out.instructions) &&
-    out.instructions.length === steps.length;
-  if (!valid) throw new Error('Gemini returned a translation with a different structure.');
-
-  return {
-    sourceLanguage: out.sourceLanguage,
-    title: out.title || recipe.title || '',
-    description: typeof out.description === 'string' ? out.description : recipe.description || '',
-    ingredientSections: sections.map((section, si) => ({
-      ...section,
-      title: out.ingredientSections[si].title || section.title,
-      items: section.items.map((item, ii) => {
-        const t = out.ingredientSections[si].items[ii];
-        return {
-          ...item,
-          name: t.name || item.name,
-          unit: typeof t.unit === 'string' ? t.unit : item.unit,
-          notes: item.notes ? t.notes || item.notes : item.notes,
-        };
-      }),
-    })),
-    instructions: steps.map((step, i) => ({ ...step, text: out.instructions[i].text || step.text })),
-  };
+// Translate a whole recipe in one call (see shared/geminiTasks): Dutch recipes go to English, everything else to Dutch.
+export function translateRecipeWithGemini(recipe: Partial<Recipe>): Promise<GeminiTranslation> {
+  return translateRecipe(recipe, geminiGenerate);
 }
