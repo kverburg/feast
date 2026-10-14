@@ -3,8 +3,8 @@
 //
 // How it fits the Workers free plan (10 ms CPU per run, 1000 KV writes a day):
 //  - The app tells the worker what is waiting: with every state save it sends a short work list, which the
-//    worker stores as metadata of the 'state' key. A cron run reads only that metadata (one list call,
-//    no parsing of the state) and stops at once when nothing waits.
+//    worker stores as metadata of the 'state' key. A cron run reads only that metadata (no parsing of
+//    the state) and stops at once when nothing waits.
 //  - Only when there is work does it read the state, run the Gemini calls (waiting on Google is not CPU time)
 //    and write ONE small key, 'work', with the results ("patches"). It never writes the recipes themselves,
 //    so it cannot collide with what you are editing.
@@ -56,11 +56,15 @@ const parseEntry = (entry) => {
   return kind && id && hash ? { kind, id, hash, key: entry } : null;
 };
 
-/** What the app has reported as waiting (read from KV metadata: no value read, no parsing). */
+/**
+ * What the app has reported as waiting. It is read from the metadata of the 'state' key. (KV list calls would do
+ * it too, but the free plan allows only 1000 of those a day and the cron runs 1440 times; reads are 100,000.)
+ * The value is fetched as a stream and cancelled unread, so the state is not parsed.
+ */
 export async function pendingEntries(env) {
-  const listed = await env.FEAST.list({ prefix: 'state', limit: 5 });
-  const meta = listed.keys.find((k) => k.name === 'state')?.metadata;
-  return (meta?.work || []).map(parseEntry).filter(Boolean);
+  const { value, metadata } = await env.FEAST.getWithMetadata('state', 'stream');
+  if (value && typeof value.cancel === 'function') await value.cancel();
+  return (metadata?.work || []).map(parseEntry).filter(Boolean);
 }
 
 // Re-read the stored doc but keep the attempt counters this run has recorded

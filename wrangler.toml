@@ -11,6 +11,10 @@ routes = [{ pattern = "feast.kmverburg.nl", custom_domain = true }]
 # Static Vite build output; unknown paths fall back to index.html (SPA).
 # /api/* must hit the worker first, otherwise the SPA fallback would answer it.
 # Workers Logs: every request and console.log line is searchable in the dashboard (7 days)
+# Every minute: translate and annotate recipes that wait for it, also when no one has the app open
+[triggers]
+crons = ["* * * * *"]
+
 # Gemini models (the key itself is the GEMINI_API_KEY secret, never in this file)
 [vars]
 GEMINI_MODEL = "gemini-flash-latest"

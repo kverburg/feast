@@ -1,12 +1,15 @@
 import { Recipe } from '../types/recipe';
 import { translateRecipeWithGemini, isGeminiAvailable, classifyGeminiError, GeminiHttpError } from './geminiService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
-import { startLog, updateLog, finishLog } from './activityLog';
+import { startLog, updateLog, finishLog, recordLog } from './activityLog';
+import { fetchServerWork, acknowledgePatches, ServerPatch, ServerWork } from './serverWork';
 import { annotateRecipeVersion, VersionAnnotation } from './annotationService';
 import {
   annotationSource,
   applyAnnotationResult,
   applyTranslationResult,
+  computeWorkList,
+  contentHash,
   isUntouchedPending,
   needsAnnotation,
   withPendingTranslation,
@@ -40,10 +43,12 @@ export interface QueueStatus {
   translating: number; // recipes waiting for their translation
   annotating: number; // recipes waiting for plural names and step quantities
   note?: string; // why it waits or stopped
+  mode: 'server' | 'local'; // server: the worker does it, also when the app is closed
 }
 
 let queueState: QueueStatus['state'] = 'idle';
 let queueNote: string | undefined;
+let queueMode: 'server' | 'local' = 'local';
 const statusListeners = new Set<() => void>();
 const notifyStatus = () => statusListeners.forEach((cb) => cb());
 function setState(state: QueueStatus['state'], note?: string) {
@@ -61,6 +66,7 @@ export function getQueueStatus(): QueueStatus {
   return {
     state: queueState,
     note: queueNote,
+    mode: queueMode,
     translating: recipes.filter(isUntouchedPending).length,
     annotating: recipes.filter(needsAnnotationNow).length,
   };
@@ -112,9 +118,8 @@ export function startTranslationQueue(): void {
   });
 }
 
-async function runQueue(): Promise<void> {
-  let backoff = FIRST_BACKOFF_MS;
-
+// Housekeeping before any queue (local or server) looks at the recipes
+function prepareRecipes(): void {
   // Recipes without a second language yet (imported earlier, added by hand, ...) join the queue too.
   const all = getStoredRecipes();
   if (all.some((r) => !r.titleEn && !r.translationPending && !r.id.startsWith('seed-'))) {
@@ -130,8 +135,96 @@ async function runQueue(): Promise<void> {
       stored.map((r) => (r.translationPending && !isUntouchedPending(r) ? { ...r, translationPending: false } : r))
     );
     changeListeners.forEach((cb) => cb());
-        notifyStatus();
+    notifyStatus();
   }
+}
+
+// With a Gemini key on the server the worker does the translating and annotating, also when the app
+// is closed; the app only reports what waits and applies the results. Without one (local development,
+// or only a key typed into Settings) the app does the work itself, as before.
+async function runQueue(): Promise<void> {
+  prepareRecipes();
+  const info = await fetchServerWork();
+  if (info?.enabled) {
+    queueMode = 'server';
+    await runServerQueue(info);
+    return;
+  }
+  queueMode = 'local';
+  await runLocalQueue();
+}
+
+const SERVER_POLL_MS = 30_000;
+const SERVER_MAX_POLLS = 120; // an hour; the next app start looks again
+
+// Apply what the worker finished. A result only applies to the recipe it was made for: the fingerprint must
+// still match, so nothing you edited meanwhile is overwritten.
+function applyServerPatches(patches: ServerPatch[]): void {
+  if (patches.length === 0) return;
+  const recipes = getStoredRecipes();
+  let changed = false;
+
+  for (const patch of patches) {
+    const idx = recipes.findIndex((r) => r.id === patch.id);
+    const recipe = recipes[idx];
+    const logBase = {
+      id: `srv-${patch.key}-${patch.endedAt}`,
+      kind: patch.kind === 't' ? ('translate' as const) : ('annotate' as const),
+      label: patch.label || recipe?.title || patch.id,
+      started: patch.startedAt,
+      ended: patch.endedAt,
+    };
+    if (!recipe) continue;
+
+    if (patch.gaveUp) {
+      recordLog({ ...logBase, method: 'Gemini (server)', status: 'failed', detail: patch.error || 'The server gave up' });
+      continue;
+    }
+
+    if (patch.kind === 't' && patch.result && isUntouchedPending(recipe) && contentHash(recipe) === patch.hash) {
+      recipes[idx] = applyTranslationResult(recipe, patch.result);
+      changed = true;
+      recordLog({ ...logBase, method: patch.method, status: 'done', detail: `${patch.result.sourceLanguage === 'nl' ? 'Dutch to English' : 'To Dutch'} (done by the server)` });
+    } else if (patch.kind === 'a' && patch.result && needsAnnotation(recipe) && annotationSource(recipe) === patch.hash) {
+      recipes[idx] = applyAnnotationResult(recipe, patch.result.main, patch.result.en);
+      changed = true;
+      const refs = patch.result.main.refs.reduce((n, step) => n + step.length, 0);
+      recordLog({ ...logBase, method: patch.method, status: 'done', detail: `${Object.keys(patch.result.main.forms).length} ingredient names, ${refs} step quantities (done by the server)` });
+    }
+    // anything else is stale (edited, or applied on another device already) and simply dropped
+  }
+
+  if (changed) {
+    saveStoredRecipes(recipes);
+    changeListeners.forEach((cb) => cb());
+  }
+}
+
+async function runServerQueue(first: ServerWork): Promise<void> {
+  let info: ServerWork | null = first;
+  for (let poll = 0; poll < SERVER_MAX_POLLS; poll++) {
+    if (!info || !info.enabled) return; // no server any more: the next start decides again
+
+    applyServerPatches(info.patches);
+    await acknowledgePatches(info.patches.map((p) => p.key));
+
+    const status = info.status;
+    if (status?.state === 'stopped') {
+      setQueueError(status.note || 'The server could not use Gemini. Check the API key.');
+      return;
+    }
+    setQueueError(null);
+    setState(status?.state === 'waiting' ? 'waiting' : 'working', status?.state === 'waiting' ? status.note : undefined);
+
+    const localWork = computeWorkList(getStoredRecipes());
+    if (localWork.length === 0 && info.pending === 0) return; // nothing waits, anywhere
+    await sleep(SERVER_POLL_MS);
+    info = await fetchServerWork();
+  }
+}
+
+async function runLocalQueue(): Promise<void> {
+  let backoff = FIRST_BACKOFF_MS;
 
   const nextPending = () =>
     getStoredRecipes().find(

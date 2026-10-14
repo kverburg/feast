@@ -122,6 +122,45 @@ export function finishLog(id: string, status: 'done' | 'failed', patch: Partial<
   }
 }
 
+/**
+ * Add an entry for something that already happened elsewhere (the server did the work while the app was
+ * closed). The id makes it idempotent: a second device applying the same result does not add it twice.
+ */
+export function recordLog(entry: {
+  id: string;
+  kind: LogKind;
+  label: string;
+  method?: string;
+  detail?: string;
+  started: number;
+  ended: number;
+  status: 'done' | 'failed';
+}): void {
+  if (entries.some((e) => e.id === entry.id)) return;
+  entries = [
+    {
+      id: entry.id,
+      kind: entry.kind,
+      label: entry.label,
+      method: entry.method,
+      detail: entry.detail,
+      started: new Date(entry.started).toISOString(),
+      ended: new Date(entry.ended).toISOString(),
+      status: entry.status,
+      updated: Date.now(),
+      device: deviceId(),
+    },
+    ...entries,
+  ];
+  persist();
+  reportEvent(`job_${entry.kind}`, entry.status === 'failed' ? 'warn' : 'info', entry.detail, {
+    status: entry.status,
+    method: entry.method,
+    ms: entry.ended - entry.started,
+    where: 'server',
+  });
+}
+
 export function clearLog(): void {
   entries = [];
   lastPushed = Date.now();

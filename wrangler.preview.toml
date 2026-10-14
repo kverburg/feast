@@ -12,6 +12,8 @@ preview_urls = true
 [vars]
 GEMINI_MODEL = "gemini-flash-latest"
 GEMINI_MODEL_LIGHT = "gemini-flash-lite-latest"
+# Previews have no cron: while the app is open, polling moves background work along instead
+PUMP_ON_POLL = "true"
 
 [observability]
 enabled = true
