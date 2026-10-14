@@ -23,8 +23,54 @@ export function formatAmount(amount: number): string {
   return parseFloat(amount.toFixed(2)).toString();
 }
 
-// Metric <-> Imperial conversion helper using ingredient density
+// Pick a readable size for metric amounts: 0.13 l -> 125 ml, 1250 ml -> 1.25 l, 0.35 kg -> 350 g.
+// Small numbers keep a little precision, larger ones are rounded to what a measuring cup can show.
+export function tidyMetric(amount: number, unit: string): { amount: number; unit: string } {
+  const u = unit.toLowerCase().trim();
+  let value = amount;
+  let target = u;
+
+  if (u === 'l' && value < 1) {
+    value *= 1000;
+    target = 'ml';
+  } else if (u === 'ml' && value >= 1000) {
+    value /= 1000;
+    target = 'l';
+  } else if (u === 'kg' && value < 1) {
+    value *= 1000;
+    target = 'g';
+  } else if (u === 'g' && value >= 1000) {
+    value /= 1000;
+    target = 'kg';
+  } else if (u !== 'ml' && u !== 'g') {
+    return { amount, unit };
+  }
+
+  if (target === 'ml' || target === 'g') {
+    if (value < 10) value = Math.round(value * 2) / 2; // 7.5 g
+    else if (value < 100) value = Math.round(value); // 83 ml
+    else value = Math.round(value / 5) * 5; // 125 ml, 350 g
+    if (value >= 1000) {
+      // rounding 999 ml gives 1000 ml: that is 1 l
+      value /= 1000;
+      target = target === 'ml' ? 'l' : 'kg';
+    }
+  }
+  return { amount: value, unit: target };
+}
+
+// Metric <-> Imperial conversion helper using ingredient density; metric results get a readable size
 export function convertUnit(
+  amount: number,
+  unit: string,
+  system: 'metric' | 'imperial',
+  itemName: string = ''
+): { amount: number; unit: string } {
+  const converted = convertUnitRaw(amount, unit, system, itemName);
+  return system === 'metric' && converted.amount && converted.unit ? tidyMetric(converted.amount, converted.unit) : converted;
+}
+
+function convertUnitRaw(
   amount: number,
   unit: string,
   system: 'metric' | 'imperial',
