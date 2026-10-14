@@ -54,6 +54,46 @@ const MAX_BAD_OUTPUT_ATTEMPTS = 3;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export interface QueueStatus {
+  state: 'idle' | 'working' | 'waiting' | 'stopped';
+  translating: number; // recipes waiting for their translation
+  annotating: number; // recipes waiting for plural names and step quantities
+  note?: string; // why it waits or stopped
+}
+
+let queueState: QueueStatus['state'] = 'idle';
+let queueNote: string | undefined;
+const statusListeners = new Set<() => void>();
+const notifyStatus = () => statusListeners.forEach((cb) => cb());
+function setState(state: QueueStatus['state'], note?: string) {
+  queueState = state;
+  queueNote = note;
+  notifyStatus();
+}
+
+const needsAnnotationNow = (r: Recipe): boolean =>
+  !r.translationPending &&
+  r.annotationVersion !== ANNOTATION_VERSION &&
+  r.ingredientSections.some((sec) => sec.items.length > 0) &&
+  r.instructions.length > 0 &&
+  (badOutputAttempts.get(`annotate:${r.id}`) ?? 0) < MAX_BAD_OUTPUT_ATTEMPTS;
+
+/** What the background queue is doing and how much is waiting (shown on the activity page). */
+export function getQueueStatus(): QueueStatus {
+  const recipes = getStoredRecipes();
+  return {
+    state: queueState,
+    note: queueNote,
+    translating: recipes.filter(isUntouchedPending).length,
+    annotating: recipes.filter(needsAnnotationNow).length,
+  };
+}
+
+export function subscribeQueueStatus(cb: () => void): () => void {
+  statusListeners.add(cb);
+  return () => statusListeners.delete(cb);
+}
+
 let queueRunning = false;
 let queueError: string | null = null;
 const badOutputAttempts = new Map<string, number>();
@@ -62,6 +102,7 @@ const changeListeners = new Set<() => void>();
 const errorListeners = new Set<(message: string | null) => void>();
 
 function setQueueError(message: string | null) {
+  if (message) setState('stopped', message);
   if (message === queueError) return;
   queueError = message;
   errorListeners.forEach((cb) => cb(message));
@@ -87,8 +128,10 @@ export function subscribeTranslationError(cb: (message: string | null) => void):
 export function startTranslationQueue(): void {
   if (queueRunning) return;
   queueRunning = true;
+  setState('working');
   runQueue().finally(() => {
     queueRunning = false;
+    if (queueState !== 'stopped') setState('idle');
   });
 }
 
@@ -110,6 +153,7 @@ async function runQueue(): Promise<void> {
       stored.map((r) => (r.translationPending && !isUntouchedPending(r) ? { ...r, translationPending: false } : r))
     );
     changeListeners.forEach((cb) => cb());
+        notifyStatus();
   }
 
   const nextPending = () =>
@@ -117,13 +161,7 @@ async function runQueue(): Promise<void> {
       (r) => isUntouchedPending(r) && (badOutputAttempts.get(r.id) ?? 0) < MAX_BAD_OUTPUT_ATTEMPTS
     );
 
-  const needsAnnotation = (r: Recipe): boolean =>
-    !r.translationPending &&
-    r.annotationVersion !== ANNOTATION_VERSION &&
-    r.ingredientSections.some((sec) => sec.items.length > 0) &&
-    r.instructions.length > 0 &&
-    (badOutputAttempts.get(`annotate:${r.id}`) ?? 0) < MAX_BAD_OUTPUT_ATTEMPTS;
-  const nextToAnnotate = () => getStoredRecipes().find(needsAnnotation);
+  const nextToAnnotate = () => getStoredRecipes().find(needsAnnotationNow);
 
   // Adds plural forms and step quantities (see annotationService). Returns false to stop the queue.
   const annotateOne = async (r: Recipe): Promise<boolean> => {
@@ -162,6 +200,7 @@ async function runQueue(): Promise<void> {
         };
         saveStoredRecipes(latest);
         changeListeners.forEach((cb) => cb());
+        notifyStatus();
         const refCount = main.refs.reduce((n, step) => n + step.length, 0);
         finishLog(logId, 'done', { detail: `${main.forms.size} ingredient names, ${refCount} step quantities${en ? ' (both languages)' : ''}` });
       }
@@ -175,7 +214,9 @@ async function runQueue(): Promise<void> {
       const reason = e instanceof Error ? e.message : String(e);
       if (kind === 'transient') {
         updateLog(logId, { status: 'retrying', detail: `${reason}; retrying in ${Math.round(backoff / 1000)}s` });
+        setState('waiting', `Gemini is rate limiting or unavailable (${reason}); trying again in ${Math.round(backoff / 1000)}s`);
         await sleep(backoff);
+        setState('working');
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
         return true;
       }
@@ -260,6 +301,7 @@ async function runQueue(): Promise<void> {
         };
         saveStoredRecipes(latest);
         changeListeners.forEach((cb) => cb());
+        notifyStatus();
       }
       finishLog(logId, 'done', {
         detail: result.sourceLanguage === 'nl' ? 'Dutch to English' : 'To Dutch',
@@ -273,7 +315,9 @@ async function runQueue(): Promise<void> {
       const reason = e instanceof Error ? e.message : String(e);
       if (kind === 'transient') {
         updateLog(logId, { status: 'retrying', detail: `${reason}; retrying in ${Math.round(backoff / 1000)}s` });
+        setState('waiting', `Gemini is rate limiting or unavailable (${reason}); trying again in ${Math.round(backoff / 1000)}s`);
         await sleep(backoff);
+        setState('working');
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
       } else if (kind === 'other') {
         const attempts = (badOutputAttempts.get(next.id) ?? 0) + 1;
