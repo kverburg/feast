@@ -5,7 +5,7 @@ One key per environment, each from its own secret store. The app never holds a k
 
 | Environment | Key lives in | Set it with |
 | --- | --- | --- |
-| **Production** (`feast.kmverburg.nl`) | Worker secret `GEMINI_API_KEY` | `npx wrangler secret put GEMINI_API_KEY` (paste the prod key at the prompt) |
+| **Production** (`feast.kmverburg.nl`) | Worker secret `GEMINI_API_KEY`, set by CI from the GitHub secret `GEMINI_API_KEY` | add the GitHub secret `GEMINI_API_KEY`; every deploy to `main` uploads it together with the deployment |
 | **Test** (PR previews) | GitHub Actions secret `GEMINI_API_KEY_TEST` | repo > Settings > Secrets and variables > Actions. The preview job uploads it with that preview version only (`--secrets-file`), so production keeps its own. |
 | **Dev** (`npm run dev`) | `.env.local` (git-ignored) | copy `.env.example` to `.env.local` and fill in `GEMINI_API_KEY` |
 
@@ -17,6 +17,8 @@ Notes
 - If `GEMINI_API_KEY_TEST` is not set, previews use the production secret (the CI log says so).
 - Rotating a key: change the secret in its store, nothing in the code.
 - Check what is set (names only): `npx wrangler secret list --name feast`.
+- Setting the production key by hand with `npx wrangler secret put` only works while the newest uploaded version is the deployed one; a PR preview upload breaks that ("latest version isn't currently deployed"). That is why CI sets it during the deploy instead. Never use `wrangler versions secret put` for this: it builds on the newest version, which can be unmerged preview code.
+- If the GitHub secret `GEMINI_API_KEY` is missing, a deploy leaves the worker's current key unchanged.
 - Never put a key in a file that is committed, in a `VITE_` variable (those are bundled into the app) or in chat.
 
 ## Models
