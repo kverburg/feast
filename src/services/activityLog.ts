@@ -2,6 +2,8 @@
 // Kept on this device (localStorage) and merged through the worker (/api/activity) so the
 // log is shared across devices. Last 2000 entries.
 
+import { reportEvent } from './telemetry';
+
 export type LogKind = 'import' | 'translate' | 'reparse';
 export type LogStatus = 'running' | 'retrying' | 'done' | 'failed';
 
@@ -21,6 +23,14 @@ export interface LogEntry {
 const STORAGE_KEY = 'gourmet_craft_activity_v1';
 const DEVICE_KEY = 'gourmet_craft_device_id_v1';
 const MAX_ENTRIES = 2000;
+
+const hostOf = (label: string): string | undefined => {
+  try {
+    return new URL(label).host;
+  } catch {
+    return undefined; // not a URL (pasted text, photo name)
+  }
+};
 
 const deviceId = (): string => {
   try {
@@ -89,6 +99,10 @@ export function startLog(kind: LogKind, label: string, method?: string): string 
 export function updateLog(id: string, patch: Partial<Pick<LogEntry, 'method' | 'detail' | 'status' | 'label'>>): void {
   entries = entries.map((e) => (e.id === id ? { ...e, ...patch, updated: Date.now() } : e));
   persist();
+  if (patch.status === 'retrying') {
+    const e = entries.find((x) => x.id === id);
+    if (e) reportEvent(`job_${e.kind}_retry`, 'warn', patch.detail, { method: e.method });
+  }
 }
 
 export function finishLog(id: string, status: 'done' | 'failed', patch: Partial<Pick<LogEntry, 'method' | 'detail' | 'label'>> = {}): void {
@@ -96,6 +110,16 @@ export function finishLog(id: string, status: 'done' | 'failed', patch: Partial<
     e.id === id ? { ...e, ...patch, status, ended: new Date().toISOString(), updated: Date.now() } : e
   );
   persist();
+  const done = entries.find((e) => e.id === id);
+  if (done) {
+    // The same outcome goes to Workers Logs, so it can be queried and graphed there too
+    reportEvent(`job_${done.kind}`, status === 'failed' ? 'warn' : 'info', done.detail, {
+      status,
+      method: done.method,
+      ms: done.ended ? new Date(done.ended).getTime() - new Date(done.started).getTime() : undefined,
+      host: done.kind === 'import' ? hostOf(done.label) : undefined,
+    });
+  }
 }
 
 export function clearLog(): void {
