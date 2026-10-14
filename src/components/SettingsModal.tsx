@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { getStoredApiKey, saveStoredApiKey } from '../services/storageService';
 import { verifyGeminiKey, getGeminiStatus } from '../services/geminiService';
 import { startTranslationQueue } from '../services/translationService';
-import { Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
+import { startLog, finishLog } from '../services/activityLog';
+import { showToast } from '../services/toast';
+import { Activity, Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
 import { Recipe } from '../types/recipe';
 import { parseCookmateXml } from '../services/cookmateImportService';
 
@@ -14,10 +16,12 @@ interface SettingsModalProps {
   toggleTheme: () => void;
   voiceEnabled: boolean;
   onToggleVoice: (enabled: boolean) => void;
+  onOpenActivityLog: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   recipes,
+  onOpenActivityLog,
   onImportBackup,
   onResetSeed,
   theme,
@@ -68,16 +72,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         const text = event.target?.result as string;
         try {
           if (file.name.endsWith('.xml') || text.trim().startsWith('<?xml') || text.includes('<cookbook')) {
-            const imported = await parseCookmateXml(text);
-            if (imported.length > 0) {
-              const combined = [...recipes, ...imported];
-              onImportBackup(combined);
-              alert(`Successfully imported ${imported.length} recipes from Cookmate XML!`);
-              return;
-            } else {
-              alert('No valid recipes found in Cookmate XML file.');
-              return;
+            const logId = startLog('import', file.name, 'Cookmate XML');
+            try {
+              const imported = await parseCookmateXml(text);
+              if (imported.length > 0) {
+                onImportBackup([...recipes, ...imported]);
+                finishLog(logId, 'done', { detail: `${imported.length} recipes` });
+                showToast({ kind: 'success', message: `Imported ${imported.length} recipes from Cookmate. Translations run in the background.` });
+              } else {
+                finishLog(logId, 'failed', { detail: 'No valid recipes found' });
+                showToast({ kind: 'error', message: 'No valid recipes found in the Cookmate XML file.' });
+              }
+            } catch (err) {
+              finishLog(logId, 'failed', { detail: (err as any)?.message || 'Unknown error' });
+              throw err;
             }
+            return;
           }
 
           const importedRecipes = JSON.parse(text);
@@ -99,19 +109,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       const reader = new FileReader();
+      const logId = startLog('import', file.name, 'Cookmate XML');
       reader.onload = async (event) => {
         try {
           const text = event.target?.result as string;
           const imported = await parseCookmateXml(text);
           if (imported.length > 0) {
-            const combined = [...recipes, ...imported];
-            onImportBackup(combined);
-            alert(`🎉 Successfully imported ${imported.length} recipes from Cookmate!`);
+            onImportBackup([...recipes, ...imported]);
+            finishLog(logId, 'done', { detail: `${imported.length} recipes` });
+            showToast({ kind: 'success', message: `Imported ${imported.length} recipes from Cookmate. Translations run in the background.` });
           } else {
-            alert('No valid recipes found in the selected Cookmate XML file.');
+            finishLog(logId, 'failed', { detail: 'No valid recipes found' });
+            showToast({ kind: 'error', message: 'No valid recipes found in the selected Cookmate XML file.' });
           }
         } catch (err: any) {
-          alert('Failed to parse Cookmate XML: ' + (err?.message || 'Unknown error'));
+          finishLog(logId, 'failed', { detail: err?.message || 'Unknown error' });
+          showToast({ kind: 'error', message: 'Failed to parse Cookmate XML: ' + (err?.message || 'Unknown error') });
         }
       };
       reader.readAsText(file);
@@ -270,6 +283,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               )}
             </div>
           </form>
+        </div>
+
+        <div className="settings-card card">
+          <div className="setting-row">
+            <div>
+              <span className="setting-name">Activity log</span>
+              <p className="setting-desc">
+                Imports, translations and AI re-parses: when they ran, what was used and how they ended.
+              </p>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={onOpenActivityLog}>
+              <Activity size={16} />
+              <span>Open activity log</span>
+            </button>
+          </div>
         </div>
       </div>
 

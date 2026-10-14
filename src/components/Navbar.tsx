@@ -1,5 +1,5 @@
 import React from 'react';
-import { UtensilsCrossed, ShoppingBag, Settings, Sun, Moon, Search, Plus, CalendarDays } from 'lucide-react';
+import { Loader2, AlertTriangle, UtensilsCrossed, ShoppingBag, Settings, Sun, Moon, Search, Plus, CalendarDays } from 'lucide-react';
 
 interface NavbarProps {
   currentTab: 'recipes' | 'meals' | 'shopping' | 'settings';
@@ -11,6 +11,9 @@ interface NavbarProps {
   toggleTheme: () => void;
   language: 'nl' | 'en';
   setLanguage: (language: 'nl' | 'en') => void;
+  importBusy: number;
+  importFailed: number;
+  onOpenActivity: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -23,6 +26,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   toggleTheme,
   language,
   setLanguage,
+  importBusy,
+  importFailed,
+  onOpenActivity,
 }) => {
   return (
     <>
@@ -61,6 +67,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Plus size={16} />
               <span>Import / Add</span>
             </button>
+            {(importBusy > 0 || importFailed > 0) && (
+              <button
+                className={`import-chip ${importFailed > 0 && importBusy === 0 ? 'failed' : ''}`}
+                onClick={onOpenActivity}
+                title="Open the activity log"
+              >
+                {importBusy > 0 ? <Loader2 size={14} className="spin-icon" /> : <AlertTriangle size={14} />}
+                <span>{importBusy > 0 ? `Importing ${importBusy}` : `${importFailed} failed`}</span>
+              </button>
+            )}
             <div className="lang-toggle-group">
               <button
                 className={`lang-btn ${language === 'nl' ? 'active' : ''}`}
@@ -183,6 +199,25 @@ export const Navbar: React.FC<NavbarProps> = ({
           border-radius: var(--radius-full);
           letter-spacing: 0.05em;
         }
+        .import-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          padding: 0.3rem 0.65rem;
+          border-radius: var(--radius-full);
+          border: 1px solid var(--accent-primary);
+          background: var(--badge-bg);
+          color: var(--badge-text);
+          font-size: 0.78rem;
+          font-weight: 700;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .import-chip.failed {
+          border-color: #ef4444;
+          color: #ef4444;
+          background: rgba(239, 68, 68, 0.1);
+        }
         .lang-toggle-group {
           display: flex;
           gap: 0.25rem;
@@ -260,6 +295,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           }
           .lang-flag {
             display: none;
+          }
+          .import-chip span {
+            display: none;
+          }
+          .import-chip {
+            padding: 0.35rem;
           }
           .lang-toggle-group {
             flex-shrink: 0;

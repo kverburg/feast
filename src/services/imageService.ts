@@ -1,4 +1,5 @@
 const MAX_DIMENSION = 1200;
+const SCAN_DIMENSION = 1600; // photos of recipe pages need more detail to stay readable
 const JPEG_QUALITY = 0.85;
 
 async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
@@ -21,11 +22,11 @@ async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
 }
 
 // Shrink a photo to at most 1200px and re-encode as JPEG, so uploads stay around 100-300 KB.
-async function resizeToJpeg(file: File): Promise<Blob> {
+async function resizeToJpeg(file: File, maxDimension: number = MAX_DIMENSION): Promise<Blob> {
   const bitmap = await loadBitmap(file);
   const width = 'naturalWidth' in bitmap ? bitmap.naturalWidth : bitmap.width;
   const height = 'naturalHeight' in bitmap ? bitmap.naturalHeight : bitmap.height;
-  const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height));
+  const scale = Math.min(1, maxDimension / Math.max(width, height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(width * scale));
   canvas.height = Math.max(1, Math.round(height * scale));
@@ -65,4 +66,10 @@ export async function uploadRecipeImage(file: File): Promise<string> {
     // fall back to inline below
   }
   return blobToDataUrl(blob);
+}
+
+/** A photo of a recipe page, shrunk for scanning (OCR or AI) and returned as a data URL. */
+export async function photoToScanDataUrl(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('That file is not an image.');
+  return blobToDataUrl(await resizeToJpeg(file, SCAN_DIMENSION));
 }

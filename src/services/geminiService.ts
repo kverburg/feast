@@ -1,5 +1,4 @@
 import { Recipe, IngredientSection, InstructionStep } from '../types/recipe';
-import { parseRawTextToRecipe } from './recipeParserService';
 
 import { getStoredApiKey } from './storageService';
 
@@ -97,71 +96,107 @@ export async function verifyGeminiKey(apiKey?: string): Promise<{ ok: boolean; m
   }
 }
 
+const RECIPE_CATEGORIES = ['Main', 'Appetizer', 'Dessert', 'Baking', 'Breakfast', 'Beverage', 'Side', 'Sauce'];
+
+const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+
+// Models are unreliable with ids, types and counts; rebuild a clean recipe from their answer.
+function normalizeParsedRecipe(raw: any): Partial<Recipe> {
+  const toNumber = (v: unknown, fallback: number) => {
+    const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(',', '.'));
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const sections: IngredientSection[] = (Array.isArray(raw.ingredientSections) ? raw.ingredientSections : [])
+    .map((sec: any) => ({
+      id: uid('sec'),
+      title: String(sec?.title || 'Ingredients'),
+      items: (Array.isArray(sec?.items) ? sec.items : [])
+        .filter((it: any) => it && String(it.name || '').trim())
+        .map((it: any) => ({
+          id: uid('ing'),
+          amount: toNumber(it.amount, 1),
+          unit: String(it.unit || ''),
+          name: String(it.name).trim(),
+          notes: it.notes ? String(it.notes) : undefined,
+        })),
+    }))
+    .filter((sec: IngredientSection) => sec.items.length > 0);
+  const steps: InstructionStep[] = (Array.isArray(raw.instructions) ? raw.instructions : [])
+    .filter((st: any) => st && String(st.text || '').trim())
+    .map((st: any, i: number) => ({
+      id: uid('st'),
+      stepNumber: i + 1,
+      text: String(st.text).trim(),
+      timerMinutes: st.timerMinutes ? toNumber(st.timerMinutes, 0) || undefined : undefined,
+    }));
+
+  return {
+    title: String(raw.title || '').trim() || 'Imported Recipe',
+    description: String(raw.description || '').trim(),
+    category: RECIPE_CATEGORIES.includes(raw.category) ? raw.category : 'Main',
+    servings: Math.max(1, Math.round(toNumber(raw.servings, 4))),
+    prepTime: Math.max(0, Math.round(toNumber(raw.prepTime, 15))),
+    cookTime: Math.max(0, Math.round(toNumber(raw.cookTime, 20))),
+    ingredientSections: sections,
+    instructions: steps,
+  };
+}
+
+/**
+ * Read a recipe out of page text or a photo with Gemini. Throws on any failure
+ * (no key, rate limit, unreadable answer) so the caller can show or log the reason.
+ */
 export async function parseRecipeWithGemini(
   promptTextOrBase64Image: string,
   isImage: boolean = false
 ): Promise<Partial<Recipe>> {
-  try {
-    const promptInstructions = `
-Analyze this recipe content and respond ONLY with a JSON object matching this schema:
+  const promptInstructions = `Extract the recipe from the content below and respond ONLY with a JSON object of this shape:
 {
   "title": "Recipe Title",
-  "description": "Short description",
+  "description": "One or two sentences about the dish",
   "category": "Main" | "Appetizer" | "Dessert" | "Baking" | "Breakfast" | "Beverage" | "Side" | "Sauce",
   "servings": 4,
   "prepTime": 15,
   "cookTime": 25,
   "ingredientSections": [
-    {
-      "id": "sec-1",
-      "title": "For the Pasta",
-      "items": [
-        { "id": "ing-1", "amount": 400, "unit": "g", "name": "Tagliatelle", "notes": "al dente" }
-      ]
-    }
+    { "title": "For the Pasta", "items": [ { "amount": 400, "unit": "g", "name": "Tagliatelle", "notes": "al dente" } ] }
   ],
   "instructions": [
-    { "id": "st-1", "stepNumber": 1, "text": "Step description", "timerMinutes": 10 }
+    { "text": "Step description", "timerMinutes": 10 }
   ]
 }
-    `;
+Rules:
+- Keep the original language of the recipe. Do not translate and do not convert units.
+- Ignore menus, ads, comments, related recipes and anything that is not part of this one recipe.
+- "amount" is a number (use decimals for fractions, 1 when unspecified); "unit" is empty when there is none.
+- Use one section called "Ingredients" when the recipe does not split its ingredients into parts.
+- "timerMinutes" only when a step clearly names a duration; otherwise leave it out.`;
 
-    const contents = isImage ? [
-      {
-        parts: [
-          { text: promptInstructions },
-          {
-            inline_data: {
-              mime_type: 'image/jpeg',
-              data: promptTextOrBase64Image.replace(/^data:image\/\w+;base64,/, '')
-            }
-          }
-        ]
-      }
-    ] : [
-      {
-        parts: [
-          { text: `${promptInstructions}\n\nRecipe Source Content:\n${promptTextOrBase64Image}` }
-        ]
-      }
-    ];
+  const contents = isImage
+    ? [
+        {
+          parts: [
+            { text: promptInstructions },
+            {
+              inline_data: {
+                mime_type: 'image/jpeg',
+                data: promptTextOrBase64Image.replace(/^data:image\/\w+;base64,/, ''),
+              },
+            },
+          ],
+        },
+      ]
+    : [{ parts: [{ text: `${promptInstructions}\n\nRecipe Source Content:\n${promptTextOrBase64Image}` }] }];
 
-    const data = await geminiGenerate({ contents });
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      return parsed;
-    }
-
-    throw new Error('Gemini returned no recipe data.');
-  } catch (error) {
-    // Images can't be parsed as text; let the caller fall back to local OCR.
-    if (isImage) throw error;
-    console.error('Gemini API parse failed, falling back to client parser', error);
-    return parseRawTextToRecipe(promptTextOrBase64Image);
+  const data = await geminiGenerate({ contents, generationConfig: { responseMimeType: 'application/json', temperature: 0.1 } });
+  const responseText: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Gemini returned no recipe data.');
+  const parsed = normalizeParsedRecipe(JSON.parse(jsonMatch[0]));
+  if ((parsed.ingredientSections?.length ?? 0) === 0 && (parsed.instructions?.length ?? 0) === 0) {
+    throw new Error('Gemini did not find a recipe in this content.');
   }
+  return parsed;
 }
 
 export interface GeminiTranslation {
