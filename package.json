@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:worker": "vite build && wrangler dev --test-scheduled"
   },
   "dependencies": {
     "lucide-react": "^0.344.0",

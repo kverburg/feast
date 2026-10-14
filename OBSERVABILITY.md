@@ -12,6 +12,7 @@ Every `/api/*` call is logged as one structured line, and every field is searcha
 | `gemini_upstream` | `status`, `ms`, `requestBytes`, `error` | rate limits (429), slow Gemini calls, rejected keys |
 | `state_conflict` | `clientRev`, `serverRev` | two devices saving at once |
 | `client` | `type`, `level`, `message`, `data`, `count`, `device`, `version`, `page` | what the app reports (below) |
+| `work_done`, `work_waiting`, `work_stopped`, `work_bad_output`, `cron_work` | `kind` (t = translate, a = annotate), `ms`, `calls`, `reason`, `waitMs` | background work on the server (see `BACKGROUND_WORK.md`) |
 | `unhandled_error` | `path`, `message`, `stack` | bugs in the worker |
 
 Handy filters: `event = client AND level = error`, `event = gemini_upstream AND status != 200`.

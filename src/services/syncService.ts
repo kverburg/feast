@@ -5,6 +5,7 @@
 // If /api/state is unavailable (e.g. local dev), the app silently stays local-only.
 
 import { reportEvent } from './telemetry';
+import { computeWorkList } from '../shared/recipeWork';
 
 const SYNCED_KEYS: Record<string, string> = {
   gourmet_craft_recipes_v1: 'recipes',
@@ -42,14 +43,24 @@ const writeLocal = (data: SyncData) => {
   }
 };
 
+// What waits for background work, for the worker (see worker/work.js)
+const workListFor = (data: SyncData): string[] => {
+  try {
+    return Array.isArray(data.recipes) ? computeWorkList(data.recipes as Parameters<typeof computeWorkList>[0]) : [];
+  } catch {
+    return [];
+  }
+};
+
 const push = async (keepalive = false) => {
   window.clearTimeout(timer);
   timer = undefined;
+  const local = readLocal();
   try {
     const res = await fetch('/api/state', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rev, data: readLocal() }),
+      body: JSON.stringify({ rev, data: local, work: workListFor(local) }),
       keepalive,
     });
     if (res.status === 409) {

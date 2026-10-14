@@ -12,6 +12,7 @@ One key per environment, each from its own secret store. The app never holds a k
 Notes
 - Free-tier limits are counted per Google project (and per model): give each environment its own project.
   Put the key with the most headroom on production.
+- The server key is also what the **background work** uses (see `BACKGROUND_WORK.md`): translating and annotating continue with the app closed, but only with a server key. A key typed into Settings is never used by the server.
 - **Leave the key field in Settings empty.** A key typed there overrides the server key and is stored,
   synced and shown in plain text. It is only meant as a fallback.
 - If `GEMINI_API_KEY_TEST` is not set, previews use the production secret (the CI log says so).

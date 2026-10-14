@@ -84,6 +84,11 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack }) => {
             </div>
           )}
           {queue.note && <div className="activity-detail">{queue.note}</div>}
+          <div className="activity-detail">
+            {queue.mode === 'server'
+              ? 'The server does this work, so it also continues when the app is closed. Results appear the next time the app is open.'
+              : 'This work only runs while the app is open (no server key configured).'}
+          </div>
         </div>
       )}
 

@@ -1,4 +1,5 @@
 import { geminiProxy } from './gemini.js';
+import { processWork, readWork, acknowledge, clipWorkList, pendingEntries } from './work.js';
 
 // Feast: serves the app (static assets) and stores one shared state in KV.
 const json = (o, status = 200) =>
@@ -46,6 +47,25 @@ async function handleImage(url, req, env) {
         'Cache-Control': 'private, max-age=31536000, immutable',
       },
     });
+  }
+
+  return new Response('Method not allowed', { status: 405 });
+}
+
+// Background work (translating and annotating recipes): see work.js
+async function handleWork(url, req, env, ctx) {
+  if (url.pathname === '/api/work/ack' && req.method === 'POST') {
+    let body;
+    try { body = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
+    return json({ ok: true, removed: await acknowledge(env, body && body.keys) });
+  }
+
+  if (url.pathname === '/api/work' && req.method === 'GET') {
+    const enabled = !!env.GEMINI_API_KEY; // the server needs its own Gemini key to work in the background
+    const [doc, pending] = enabled ? await Promise.all([readWork(env), pendingEntries(env)]) : [null, []];
+    // Previews have no cron: while the app is open, polling moves the work along instead
+    if (enabled && env.PUMP_ON_POLL === 'true' && pending.length > 0 && ctx) ctx.waitUntil(processWork(env, { log }));
+    return json({ enabled, status: doc ? doc.status : null, patches: doc ? doc.patches : [], pending: pending.length });
   }
 
   return new Response('Method not allowed', { status: 405 });
@@ -127,18 +147,21 @@ async function handleClientLog(req, env) {
   return json({ ok: true, stored: events.length });
 }
 
-async function route(req, env) {
+async function route(req, env, ctx) {
   const url = new URL(req.url);
   const isState = url.pathname === '/api/state';
   const isGemini = url.pathname.startsWith('/api/gemini/');
   const isImage = url.pathname === '/api/image' || url.pathname.startsWith('/api/image/');
   const isActivity = url.pathname === '/api/activity';
   const isClientLog = url.pathname === '/api/log';
-  if (!isState && !isGemini && !isImage && !isActivity && !isClientLog) return env.ASSETS.fetch(req);
+  const isWork = url.pathname === '/api/work' || url.pathname === '/api/work/ack';
+  if (!isState && !isGemini && !isImage && !isActivity && !isClientLog && !isWork) return env.ASSETS.fetch(req);
 
   // Cloudflare Access adds this header after login. Without it, refuse.
-  if (!req.headers.get('Cf-Access-Jwt-Assertion')) return new Response('Forbidden', { status: 403 });
+  // (DEV_SKIP_ACCESS is only ever set in .dev.vars for running the worker locally.)
+  if (!req.headers.get('Cf-Access-Jwt-Assertion') && env.DEV_SKIP_ACCESS !== '1') return new Response('Forbidden', { status: 403 });
 
+  if (isWork) return handleWork(url, req, env, ctx);
   if (isGemini) return handleGemini(url, req, env);
   if (isImage) return handleImage(url, req, env);
   if (isActivity) return handleActivity(req, env);
@@ -158,18 +181,19 @@ async function route(req, env) {
       return json(current, 409); // someone saved in between
     }
     const next = { rev: current.rev + 1, data: body.data };
-    await env.FEAST.put('state', JSON.stringify(next));
+    // What is waiting for background work travels as metadata, so the cron run can read it without the state
+    await env.FEAST.put('state', JSON.stringify(next), { metadata: { work: clipWorkList(body.work) } });
     return json({ rev: next.rev });
   }
   return new Response('Method not allowed', { status: 405 });
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const started = Date.now();
     try {
-      const res = await route(req, env);
+      const res = await route(req, env, ctx);
       if (url.pathname.startsWith('/api/')) {
         // One line per API call: route, status and time. 4xx/5xx are warnings so they stand out.
         const path = url.pathname.startsWith('/api/image/') ? '/api/image/:id' : url.pathname;
@@ -186,5 +210,13 @@ export default {
       log('error', { event: 'unhandled_error', path: url.pathname, method: req.method, message: String(e && e.message ? e.message : e), stack: e && e.stack ? String(e.stack).split('\n').slice(0, 4).join(' | ') : undefined });
       return json({ error: 'internal_error' }, 500);
     }
+  },
+  // Cron (every minute, production only): work on what the app reported as waiting, even with every device closed
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      processWork(env, { log }).then((result) => {
+        if (!['idle', 'no_key', 'nothing_to_do', 'backing_off'].includes(result)) log('info', { event: 'cron_work', result });
+      })
+    );
   },
 };

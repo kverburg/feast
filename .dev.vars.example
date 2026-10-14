@@ -1,0 +1,8 @@
+# Copy to .dev.vars (ignored by git) to run the real worker locally: npm run dev:worker
+# Never use the production key here.
+GEMINI_API_KEY=
+# Local only: the worker normally refuses requests that did not come through Cloudflare Access
+DEV_SKIP_ACCESS=1
+# Optional: send Gemini calls to a local stand-in instead of Google, and drop the pause between calls
+# GEMINI_BASE=http://127.0.0.1:8799
+# WORK_GAP_MS=0
