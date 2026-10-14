@@ -73,19 +73,54 @@ async function handleImage(url, req, env) {
   return new Response('Method not allowed', { status: 405 });
 }
 
+const MAX_ACTIVITY_ENTRIES = 2000;
+const MAX_ACTIVITY_BODY = 1024 * 1024;
+
+// Shared activity log (imports, translations): devices push entries and the worker merges them by id.
+async function handleActivity(req, env) {
+  const raw = await env.FEAST.get('activity');
+  const current = raw ? JSON.parse(raw) : [];
+
+  if (req.method === 'GET') return json({ entries: current });
+
+  if (req.method === 'POST') {
+    const text = await req.text();
+    if (text.length > MAX_ACTIVITY_BODY) return json({ error: 'too_large' }, 413);
+    let body;
+    try { body = JSON.parse(text); } catch { return json({ error: 'bad json' }, 400); }
+    if (!body || !Array.isArray(body.entries)) return json({ error: 'bad body' }, 400);
+
+    const byId = new Map(current.map((e) => [e.id, e]));
+    for (const e of body.entries) {
+      if (!e || typeof e.id !== 'string' || typeof e.updated !== 'number' || typeof e.started !== 'string') continue;
+      const mine = byId.get(e.id);
+      if (!mine || e.updated > mine.updated) byId.set(e.id, e);
+    }
+    const merged = [...byId.values()]
+      .sort((a, b) => b.started.localeCompare(a.started))
+      .slice(0, MAX_ACTIVITY_ENTRIES);
+    await env.FEAST.put('activity', JSON.stringify(merged));
+    return json({ ok: true, count: merged.length });
+  }
+
+  return new Response('Method not allowed', { status: 405 });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const isState = url.pathname === '/api/state';
     const isGemini = url.pathname.startsWith('/api/gemini/');
     const isImage = url.pathname === '/api/image' || url.pathname.startsWith('/api/image/');
-    if (!isState && !isGemini && !isImage) return env.ASSETS.fetch(req);
+    const isActivity = url.pathname === '/api/activity';
+    if (!isState && !isGemini && !isImage && !isActivity) return env.ASSETS.fetch(req);
 
     // Cloudflare Access adds this header after login. Without it, refuse.
     if (!req.headers.get('Cf-Access-Jwt-Assertion')) return new Response('Forbidden', { status: 403 });
 
     if (isGemini) return handleGemini(url, req, env);
     if (isImage) return handleImage(url, req, env);
+    if (isActivity) return handleActivity(req, env);
 
     const raw = await env.FEAST.get('state');
     const current = raw ? JSON.parse(raw) : { rev: 0, data: null };

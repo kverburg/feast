@@ -25,6 +25,10 @@ import { SettingsModal } from './components/SettingsModal';
 import { Meals } from './components/Meals';
 import { startTranslationQueue, subscribeTranslationChange, subscribeTranslationError } from './services/translationService';
 import { ErrorBanner } from './components/ErrorBanner';
+import { Toasts } from './components/Toasts';
+import { showToast } from './services/toast';
+import { getImportJobs, startImportQueue, subscribeImportEvents, subscribeImportJobs } from './services/importQueue';
+import { pullActivity } from './services/activityLog';
 import { Meal, getStoredMeals, saveStoredMeals } from './services/mealService';
 
 export function App() {
@@ -32,6 +36,7 @@ export function App() {
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
   const [translationError, setTranslationError] = useState<string | null>(null);
+  const [importCounts, setImportCounts] = useState({ busy: 0, failed: 0 });
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [currentTab, setCurrentTab] = useState<'recipes' | 'meals' | 'shopping' | 'settings'>('recipes');
   const [searchQuery, setSearchQuery] = useState('');
@@ -169,12 +174,52 @@ export function App() {
     const unsubscribeError = subscribeTranslationError(setTranslationError);
     startTranslationQueue();
 
+    // Background imports: notify when done or failed, resume anything still queued from last time
+    const updateImportCounts = () => {
+      const jobs = getImportJobs();
+      setImportCounts({
+        busy: jobs.filter((j) => j.status !== 'failed').length,
+        failed: jobs.filter((j) => j.status === 'failed').length,
+      });
+    };
+    const unsubscribeJobs = subscribeImportJobs(updateImportCounts);
+    const unsubscribeImports = subscribeImportEvents((event) => {
+      if (event.type === 'done') {
+        setRecipes(getStoredRecipes());
+        startTranslationQueue();
+        showToast({
+          kind: 'success',
+          message: `Imported "${event.recipe.title}"`,
+          actionLabel: 'Open',
+          onAction: () => {
+            setCurrentTab('recipes');
+            setSelectedRecipe(event.recipe);
+          },
+        });
+      } else if (event.type === 'failed') {
+        showToast({
+          kind: 'error',
+          message: `Import failed (${event.job.label.slice(0, 50)}): ${event.error}`,
+          actionLabel: 'Details',
+          onAction: () => {
+            setCurrentTab('settings');
+            setSelectedRecipe(null);
+          },
+        });
+      }
+    });
+    updateImportCounts();
+    startImportQueue();
+    void pullActivity();
+
     const loadedVoice = getStoredVoiceEnabled();
     setVoiceEnabled(loadedVoice);
 
     return () => {
       unsubscribeChange();
       unsubscribeError();
+      unsubscribeJobs();
+      unsubscribeImports();
     };
   }, []);
 
@@ -208,6 +253,8 @@ export function App() {
       setSelectedRecipe(recipe);
     }
 
+    if (recipe.translationPending) startTranslationQueue(); // e.g. after an AI re-parse
+
     setIsFormOpen(false);
     setEditingRecipe(null);
   };
@@ -233,17 +280,6 @@ export function App() {
     if (selectedRecipe && selectedRecipe.id === id) {
       setSelectedRecipe(prev => prev ? { ...prev, isFavorite: !prev.isFavorite } : null);
     }
-  };
-
-  // Import Handler
-  const handleImportComplete = (importedRecipe: Recipe) => {
-    const updated = [importedRecipe, ...recipes];
-    setRecipes(updated);
-    saveStoredRecipes(updated);
-    setIsImportOpen(false);
-    startTranslationQueue();
-    setSelectedRecipe(importedRecipe);
-    setCurrentTab('recipes');
   };
 
   // Shopping List Handlers
@@ -288,6 +324,12 @@ export function App() {
         toggleTheme={toggleTheme}
         language={language}
         setLanguage={setLanguage}
+        importBusy={importCounts.busy}
+        importFailed={importCounts.failed}
+        onOpenActivity={() => {
+          setCurrentTab('settings');
+          setSelectedRecipe(null);
+        }}
       />
 
       {translationError && (
@@ -363,6 +405,8 @@ export function App() {
         )}
       </main>
 
+      <Toasts />
+
       {/* Modals & Overlays */}
       {isFormOpen && (
         <RecipeForm
@@ -377,7 +421,6 @@ export function App() {
 
       {isImportOpen && (
         <RecipeImportModal
-          onImportComplete={handleImportComplete}
           onManualAdd={() => {
             setIsImportOpen(false);
             setEditingRecipe(null);

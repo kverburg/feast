@@ -1,6 +1,7 @@
 import { Recipe } from '../types/recipe';
 import { translateRecipeWithGemini, isGeminiAvailable, classifyGeminiError, GeminiHttpError } from './geminiService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
+import { startLog, updateLog, finishLog } from './activityLog';
 
 // ---------------------------------------------------------------------------
 // Translation via Gemini, run as a background queue.
@@ -49,6 +50,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let queueRunning = false;
 let queueError: string | null = null;
 const badOutputAttempts = new Map<string, number>();
+const logIds = new Map<string, string>(); // recipe id -> its entry in the activity log
 const changeListeners = new Set<() => void>();
 const errorListeners = new Set<(message: string | null) => void>();
 
@@ -124,6 +126,12 @@ async function runQueue(): Promise<void> {
       return;
     }
 
+    let logId = logIds.get(next.id);
+    if (!logId) {
+      logId = startLog('translate', next.title, 'Gemini');
+      logIds.set(next.id, logId);
+    }
+
     try {
       const result = await translateRecipeWithGemini(next);
       // Re-read storage so edits made while we were waiting are not overwritten.
@@ -160,20 +168,37 @@ async function runQueue(): Promise<void> {
         saveStoredRecipes(latest);
         changeListeners.forEach((cb) => cb());
       }
+      finishLog(logId, 'done', {
+        detail: result.sourceLanguage === 'nl' ? 'Dutch to English' : 'To Dutch',
+      });
+      logIds.delete(next.id);
       setQueueError(null);
       backoff = FIRST_BACKOFF_MS;
       await sleep(GAP_BETWEEN_CALLS_MS);
     } catch (e) {
       const kind = classifyGeminiError(e);
+      const reason = e instanceof Error ? e.message : String(e);
       if (kind === 'transient') {
+        updateLog(logId, { status: 'retrying', detail: `${reason}; retrying in ${Math.round(backoff / 1000)}s` });
         await sleep(backoff);
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
       } else if (kind === 'other') {
-        badOutputAttempts.set(next.id, (badOutputAttempts.get(next.id) ?? 0) + 1);
+        const attempts = (badOutputAttempts.get(next.id) ?? 0) + 1;
+        badOutputAttempts.set(next.id, attempts);
+        if (attempts >= MAX_BAD_OUTPUT_ATTEMPTS) {
+          finishLog(logId, 'failed', { detail: `${reason} (gave up after ${attempts} attempts)` });
+          logIds.delete(next.id);
+        } else {
+          updateLog(logId, { status: 'retrying', detail: reason });
+        }
       } else if (kind === 'unavailable') {
+        finishLog(logId, 'failed', { detail: 'No Gemini API key' });
+        logIds.delete(next.id);
         setQueueError(MISSING_KEY_MESSAGE);
         return;
       } else {
+        finishLog(logId, 'failed', { detail: reason });
+        logIds.delete(next.id);
         setQueueError(rejectedKeyMessage(e instanceof GeminiHttpError ? e.status : undefined));
         return; // retried when the app is opened again or a key is saved
       }

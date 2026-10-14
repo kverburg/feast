@@ -602,14 +602,60 @@ function parseJinaMarkdownToRecipe(markdown: string, sourceUrl?: string): Partia
 }
 
 // ---------------------------------------------------------------------------
-// Multi-Proxy Web URL Recipe Parser
-// Primary: Jina AI reader (bypasses bot protection, free, no key needed)
-// Fallback: HTML proxies for non-protected sites
+// Web URL fetching. Primary: Jina AI reader (gets past some bot protection, free, no key).
+// Fallback: public HTML proxies. Both return the page; what we do with it differs:
+// parseUrlToRecipe reads the recipe out of it, fetchPageText returns its text (for the AI re-parse).
 // ---------------------------------------------------------------------------
-export async function parseUrlToRecipe(url: string): Promise<Partial<Recipe>> {
+
+export const BLOCKED_SITE_MESSAGE =
+  'This site blocks automated access (bot protection). Open the page in your browser, select all and copy it, then use the "Paste HTML / Text" tab.';
+
+const HTML_PROXIES: Array<{ name: string; fetch: (u: string) => Promise<string> }> = [
+  {
+    name: 'allorigins',
+    fetch: async (u) => {
+      const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`);
+      if (!res.ok) return '';
+      const data = await res.json();
+      return data.contents || '';
+    },
+  },
+  {
+    name: 'codetabs',
+    fetch: async (u) => {
+      const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`);
+      return res.ok ? await res.text() : '';
+    },
+  },
+  {
+    name: 'cors-get-proxy',
+    fetch: async (u) => {
+      const res = await fetch(`https://cors-get-proxy.sirnev.workers.dev/?url=${encodeURIComponent(u)}`);
+      return res.ok ? await res.text() : '';
+    },
+  },
+  {
+    name: 'htmlproxy',
+    fetch: async (u) => {
+      const res = await fetch(`https://htmlproxy.site/?url=${encodeURIComponent(u)}`);
+      return res.ok ? await res.text() : '';
+    },
+  },
+];
+
+export interface UrlParseResult {
+  recipe: Partial<Recipe>;
+  method: string; // which strategy found the recipe, for the activity log
+}
+
+export async function parseUrlToRecipe(
+  url: string,
+  onStep?: (step: string) => void
+): Promise<UrlParseResult> {
   let blocked = false; // a bot-protection page came back instead of the recipe
-  // --- Primary: Jina AI reader (bypasses bot protection, free, no key needed) ---
-  // 1) Ask for the raw HTML so the site's structured recipe data (JSON-LD) can be used.
+
+  // 1) Jina, raw HTML: use the site's structured recipe data (JSON-LD).
+  onStep?.('Jina reader (recipe data)');
   try {
     const htmlRes = await fetch(`https://r.jina.ai/${url}`, { headers: { 'X-Return-Format': 'html' } });
     if (htmlRes.ok) {
@@ -617,12 +663,13 @@ export async function parseUrlToRecipe(url: string): Promise<Partial<Recipe>> {
       if (looksLikeBlockedPage(html)) blocked = true;
       else if (html.includes('ld+json')) {
         const parsed = parseHtmlContentToRecipe(html, url);
-        if (isUsableRecipe(parsed) && parsed.title !== 'Imported Recipe') return parsed;
+        if (isUsableRecipe(parsed) && parsed.title !== 'Imported Recipe') return { recipe: parsed, method: 'Jina reader (recipe data)' };
       }
     }
   } catch (_) { /* fall through to markdown */ }
 
-  // 2) Otherwise read the page as markdown and pick the recipe card out of it.
+  // 2) Jina, markdown: pick the recipe card out of the page text.
+  onStep?.('Jina reader (page text)');
   try {
     const jinaRes = await fetch(`https://r.jina.ai/${url}`, {
       headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown' },
@@ -632,51 +679,58 @@ export async function parseUrlToRecipe(url: string): Promise<Partial<Recipe>> {
       if (looksLikeBlockedPage(markdown)) blocked = true;
       else if (markdown && markdown.length > 300) {
         const parsed = parseJinaMarkdownToRecipe(markdown, url);
-        if (isUsableRecipe(parsed)) return parsed;
+        if (isUsableRecipe(parsed)) return { recipe: parsed, method: 'Jina reader (page text)' };
       }
     }
   } catch (_) { /* fall through to HTML proxies */ }
 
-  // --- Fallback: HTML proxy list ---
-  const proxyFns: Array<(u: string) => Promise<string>> = [
-    async (u) => {
-      const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`);
-      if (!res.ok) return '';
-      const data = await res.json();
-      return data.contents || '';
-    },
-    async (u) => {
-      const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`);
-      return res.ok ? await res.text() : '';
-    },
-    async (u) => {
-      const res = await fetch(`https://cors-get-proxy.sirnev.workers.dev/?url=${encodeURIComponent(u)}`);
-      return res.ok ? await res.text() : '';
-    },
-    async (u) => {
-      const res = await fetch(`https://htmlproxy.site/?url=${encodeURIComponent(u)}`);
-      return res.ok ? await res.text() : '';
-    },
-  ];
-
-  for (const proxyFn of proxyFns) {
+  // 3) Public HTML proxies.
+  for (const proxy of HTML_PROXIES) {
+    onStep?.(`Proxy: ${proxy.name}`);
     try {
-      const text = await proxyFn(url);
+      const text = await proxy.fetch(url);
       if (text && text.length > 200) {
         if (looksLikeBlockedPage(text)) {
           blocked = true;
           continue;
         }
         const parsed = parseHtmlContentToRecipe(text, url);
-        if (isUsableRecipe(parsed)) return parsed;
+        if (isUsableRecipe(parsed)) return { recipe: parsed, method: `Proxy: ${proxy.name}` };
       }
     } catch (_) { /* try next */ }
   }
 
-  if (blocked) {
-    throw new Error('This site blocks automated access (bot protection). Open the page in your browser, select all and copy it, then use the "Paste HTML / Text" tab.');
-  }
+  if (blocked) throw new Error(BLOCKED_SITE_MESSAGE);
   throw new Error('Could not find a recipe on this page. Open it in a new tab, copy the page content, and use the "Paste HTML / Text" tab to import it.');
 }
 
+/** The readable text of a page (no recipe parsing), for handing to an AI. */
+export async function fetchPageText(url: string): Promise<{ text: string; method: string }> {
+  let blocked = false;
 
+  try {
+    const res = await fetch(`https://r.jina.ai/${url}`, { headers: { 'Accept': 'text/plain', 'X-Return-Format': 'markdown' } });
+    if (res.ok) {
+      const markdown = await res.text();
+      if (looksLikeBlockedPage(markdown)) blocked = true;
+      else if (markdown.length > 300) return { text: markdown, method: 'Jina reader (page text)' };
+    }
+  } catch (_) { /* fall through */ }
+
+  for (const proxy of HTML_PROXIES) {
+    try {
+      const html = await proxy.fetch(url);
+      if (html && html.length > 200) {
+        if (looksLikeBlockedPage(html)) {
+          blocked = true;
+          continue;
+        }
+        const text = htmlToText(html);
+        if (text.length > 300) return { text, method: `Proxy: ${proxy.name}` };
+      }
+    } catch (_) { /* try next */ }
+  }
+
+  if (blocked) throw new Error(BLOCKED_SITE_MESSAGE);
+  throw new Error('Could not fetch the page. Paste its text instead.');
+}

@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Recipe, IngredientSection, InstructionStep } from '../types/recipe';
 import { uploadRecipeImage } from '../services/imageService';
-import { Plus, Trash2, Layers, Clock, Users, X, Save, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { reparseFromSource } from '../services/reparseService';
+import { withPendingTranslation } from '../services/translationService';
+import { Plus, Trash2, Layers, Clock, Users, X, Save, Sparkles, Image as ImageIcon, Wand2 } from 'lucide-react';
 
 interface RecipeFormProps {
   initialRecipe?: Partial<Recipe>;
@@ -22,6 +24,13 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
   const [prepTime, setPrepTime] = useState(initialRecipe?.prepTime || 15);
   const [cookTime, setCookTime] = useState(initialRecipe?.cookTime || 20);
   const [servings, setServings] = useState(initialRecipe?.servings || 4);
+  // "Re-parse from source with AI"
+  const [reparseBusy, setReparseBusy] = useState(false);
+  const [reparseError, setReparseError] = useState('');
+  const [reparseNote, setReparseNote] = useState('');
+  const [showPaste, setShowPaste] = useState(false);
+  const [pastedSource, setPastedSource] = useState('');
+  const reparsedRef = useRef(false); // content was replaced by the AI: the translation must be redone
   const [imageBusy, setImageBusy] = useState(false);
   const [imageError, setImageError] = useState('');
   const [image, setImage] = useState(initialRecipe?.image || 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=1000&q=80');
@@ -152,13 +161,44 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
     }
   };
 
+  const runReparse = async (source: { url: string } | { text: string }) => {
+    setReparseBusy(true);
+    setReparseError('');
+    setReparseNote('');
+    try {
+      const parsed = await reparseFromSource(source);
+      const ok = window.confirm(
+        'Replace the title, description, times, ingredients and steps with the AI-parsed version?\n\nNothing is saved until you press Save, and closing this form discards it.'
+      );
+      if (!ok) return;
+      if (parsed.title) setTitle(parsed.title);
+      setDescription(parsed.description || '');
+      if (parsed.category) setCategory(parsed.category);
+      if (parsed.prepTime !== undefined) setPrepTime(parsed.prepTime);
+      if (parsed.cookTime !== undefined) setCookTime(parsed.cookTime);
+      if (parsed.servings) setServings(parsed.servings);
+      if (parsed.ingredientSections?.length) setSections(parsed.ingredientSections);
+      if (parsed.instructions?.length) setInstructions(parsed.instructions);
+      reparsedRef.current = true;
+      setShowPaste(false);
+      setPastedSource('');
+      setReparseNote('Parsed with AI. Check the result below, then press Save. The translation will be redone after saving.');
+    } catch (err) {
+      setReparseError(err instanceof Error ? err.message : 'Re-parse failed.');
+      if (err instanceof Error && /blocks automated access|Could not fetch/.test(err.message)) setShowPaste(true);
+    } finally {
+      setReparseBusy(false);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
     const tags = tagsInput.split(',').map(t => t.trim()).filter(Boolean);
 
-    const recipe: Recipe = {
+    let recipe: Recipe = {
+      ...initialRecipe, // keeps the English version, translation state and source link
       id: initialRecipe?.id || `recipe-${Date.now()}`,
       title: title.trim(),
       description: description.trim(),
@@ -173,6 +213,18 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
       isFavorite: initialRecipe?.isFavorite || false,
       createdAt: initialRecipe?.createdAt || new Date().toISOString()
     };
+
+    if (reparsedRef.current) {
+      // New content from the AI: drop the old second language and queue a fresh translation.
+      recipe = withPendingTranslation({
+        ...recipe,
+        titleEn: undefined,
+        descriptionEn: undefined,
+        ingredientSectionsEn: undefined,
+        instructionsEn: undefined,
+        translationVersion: undefined,
+      });
+    }
 
     onSave(recipe);
   };
@@ -191,6 +243,51 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
           {/* General Information */}
           <div className="form-section">
             <h3>General Details</h3>
+
+            <div className="reparse-box">
+              <div className="reparse-actions">
+                {initialRecipe?.sourceUrl && (
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    disabled={reparseBusy}
+                    onClick={() => runReparse({ url: initialRecipe.sourceUrl! })}
+                  >
+                    <Wand2 size={14} />
+                    <span>{reparseBusy ? 'Re-parsing…' : 'Re-parse from source with AI'}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={reparseBusy}
+                  onClick={() => setShowPaste((v) => !v)}
+                >
+                  <span>{initialRecipe?.sourceUrl ? 'Paste source text instead' : 'Parse pasted text with AI'}</span>
+                </button>
+              </div>
+              {showPaste && (
+                <div className="reparse-paste">
+                  <textarea
+                    className="textarea-field"
+                    placeholder="Paste the recipe page text (or HTML) here..."
+                    value={pastedSource}
+                    onChange={(e) => setPastedSource(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={reparseBusy || !pastedSource.trim()}
+                    onClick={() => runReparse({ text: pastedSource })}
+                  >
+                    <Wand2 size={14} />
+                    <span>{reparseBusy ? 'Parsing…' : 'Parse with AI'}</span>
+                  </button>
+                </div>
+              )}
+              {reparseError && <p className="image-edit-error">{reparseError}</p>}
+              {reparseNote && <p className="reparse-note">{reparseNote}</p>}
+            </div>
             
             <div className="input-group">
               <label className="input-label">Recipe Title *</label>
@@ -489,6 +586,11 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
           flex-direction: column;
           gap: 0.5rem;
         }
+        .reparse-box { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; }
+        .reparse-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .reparse-paste { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+        .reparse-paste .textarea-field { width: 100%; min-height: 120px; }
+        .reparse-note { color: var(--accent-primary); font-size: 0.85rem; }
         .image-edit-preview {
           width: 100%;
           max-height: 220px;
