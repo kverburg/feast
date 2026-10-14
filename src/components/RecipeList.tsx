@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { Recipe } from '../types/recipe';
 import { RecipeCard } from './RecipeCard';
 import { Language } from '../services/localizeRecipe';
+import { recipeMatchesQuery } from '../services/search';
 import { Sparkles, SlidersHorizontal, Heart, Utensils, RotateCcw } from 'lucide-react';
 
 interface RecipeListProps {
@@ -14,6 +15,14 @@ interface RecipeListProps {
   onResetSeed?: () => void;
 }
 
+// The list unmounts while a recipe or another tab is open. Keep its filters and scroll position
+// here so Back lands exactly where you left.
+const savedView: { category: string; sortBy: 'newest' | 'title' | 'time'; scrollY: number } = {
+  category: 'All',
+  sortBy: 'newest',
+  scrollY: 0,
+};
+
 const CATEGORIES = ['All', 'Favorites', 'Main', 'Appetizer', 'Dessert', 'Baking', 'Breakfast', 'Beverage', 'Side', 'Sauce'];
 
 export const RecipeList: React.FC<RecipeListProps> = ({
@@ -25,8 +34,23 @@ export const RecipeList: React.FC<RecipeListProps> = ({
   onOpenImportModal,
   onResetSeed,
 }) => {
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [sortBy, setSortBy] = useState<'newest' | 'title' | 'time'>('newest');
+  const [selectedCategory, setSelectedCategory] = useState<string>(savedView.category);
+  const [sortBy, setSortBy] = useState<'newest' | 'title' | 'time'>(savedView.sortBy);
+
+  useEffect(() => {
+    savedView.category = selectedCategory;
+    savedView.sortBy = sortBy;
+  }, [selectedCategory, sortBy]);
+
+  // Restore the scroll position when coming back, and keep tracking it while the list is shown.
+  useLayoutEffect(() => {
+    window.scrollTo(0, savedView.scrollY);
+    const onScroll = () => {
+      savedView.scrollY = window.scrollY;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Filter recipes based on category, search query
   const filteredRecipes = recipes.filter((recipe) => {
@@ -37,20 +61,8 @@ export const RecipeList: React.FC<RecipeListProps> = ({
       if (recipe.category !== selectedCategory) return false;
     }
 
-    // Search query match across title, description, category, tags, and ingredient names/parts
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      const matchTitle = recipe.title.toLowerCase().includes(q);
-      const matchDesc = recipe.description?.toLowerCase().includes(q);
-      const matchCat = recipe.category?.toLowerCase().includes(q);
-      const matchTags = recipe.tags?.some(t => t.toLowerCase().includes(q));
-      const matchIngredients = recipe.ingredientSections?.some(sec => 
-        sec.title.toLowerCase().includes(q) ||
-        sec.items.some(item => item.name.toLowerCase().includes(q))
-      );
-
-      return matchTitle || matchDesc || matchCat || matchTags || matchIngredients;
-    }
+    // Search across title, description, category, tags and ingredients (accent-insensitive, both languages)
+    if (searchQuery.trim()) return recipeMatchesQuery(recipe, searchQuery);
 
     return true;
   });

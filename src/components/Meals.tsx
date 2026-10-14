@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { UtensilsCrossed, Plus, Minus, X, ShoppingBag, Search, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
 import { Recipe, ShoppingItem } from '../types/recipe';
+import { recipeMatchesQuery } from '../services/search';
 import { Meal, combineIngredients, toShoppingItems } from '../services/mealService';
 
 interface MealsProps {
@@ -78,7 +79,7 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
       return next;
     });
 
-  const pickerRecipes = recipes.filter((r) => r.title.toLowerCase().includes(pickerSearch.trim().toLowerCase()));
+  const pickerRecipes = recipes.filter((r) => recipeMatchesQuery(r, pickerSearch));
 
   return (
     <div className="meals-container">
