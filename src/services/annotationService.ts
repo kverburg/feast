@@ -1,5 +1,5 @@
 import { IngredientSection, InstructionStep, StepRef } from '../types/recipe';
-import { geminiJson } from './geminiService';
+import { geminiJson, GeminiTier } from './geminiService';
 
 // One Gemini call per language version of a recipe. It adds
 //  - the singular and plural form of every ingredient name ("ui" / "uien"), so the list follows the portions
@@ -21,7 +21,8 @@ export interface VersionAnnotation {
 export async function annotateRecipeVersion(
   sections: IngredientSection[],
   steps: InstructionStep[],
-  language: 'nl' | 'en'
+  language: 'nl' | 'en',
+  tier: GeminiTier = 'light' // annotation is simple enough for the lighter model
 ): Promise<VersionAnnotation> {
   const items = sections.flatMap((s) => s.items);
   const itemIds = new Set(items.map((i) => i.id));
@@ -46,7 +47,7 @@ ${items.map((i) => `${i.id} | ${i.amount} ${i.unit} ${i.name}`.trim()).join('\n'
 Steps:
 ${steps.map((st, n) => `${n + 1}. ${st.text}`).join('\n')}`;
 
-  const out = await geminiJson(prompt);
+  const out = await geminiJson(prompt, tier);
   if (!out || !Array.isArray(out.ingredients) || !Array.isArray(out.steps) || out.steps.length !== steps.length) {
     throw new Error('Gemini returned an annotation with a different structure.');
   }
