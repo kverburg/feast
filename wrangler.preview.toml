@@ -8,6 +8,11 @@ workers_dev = false
 preview_urls = true
 
 # Workers Logs: every request and console.log line is searchable in the dashboard (7 days)
+# Gemini models (the key itself is the GEMINI_API_KEY secret, never in this file)
+[vars]
+GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_MODEL_LIGHT = "gemini-flash-lite-latest"
+
 [observability]
 enabled = true
 head_sampling_rate = 1

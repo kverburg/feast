@@ -166,18 +166,23 @@ async function runQueue(): Promise<void> {
   // Adds plural forms and step quantities (see annotationService). Returns false to stop the queue.
   const annotateOne = async (r: Recipe): Promise<boolean> => {
     const key = `annotate:${r.id}`;
+    // The lighter model first; if it produced an unusable answer for this recipe, use the default one
+    const tier = (badOutputAttempts.get(key) ?? 0) === 0 ? 'light' : 'default';
+    const method = tier === 'light' ? 'Gemini (light model)' : 'Gemini';
     let logId = logIds.get(key);
     if (!logId) {
-      logId = startLog('annotate', r.title, 'Gemini');
+      logId = startLog('annotate', r.title, method);
       logIds.set(key, logId);
+    } else {
+      updateLog(logId, { method });
     }
     try {
       const before = annotationSource(r);
-      const main = await annotateRecipeVersion(r.ingredientSections, r.instructions, 'nl');
+      const main = await annotateRecipeVersion(r.ingredientSections, r.instructions, 'nl', tier);
       let en: VersionAnnotation | undefined;
       if (r.ingredientSectionsEn && r.instructionsEn) {
         await sleep(GAP_BETWEEN_CALLS_MS);
-        en = await annotateRecipeVersion(r.ingredientSectionsEn, r.instructionsEn, 'en');
+        en = await annotateRecipeVersion(r.ingredientSectionsEn, r.instructionsEn, 'en', tier);
       }
 
       const latest = getStoredRecipes();

@@ -1,3 +1,5 @@
+import { geminiProxy } from './gemini.js';
+
 // Feast: serves the app (static assets) and stores one shared state in KV.
 const json = (o, status = 200) =>
   new Response(JSON.stringify(o), {
@@ -5,50 +7,16 @@ const json = (o, status = 200) =>
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
 
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const GEMINI_MODEL = 'gemini-flash-latest';
-const MAX_BODY_BYTES = 12 * 1024 * 1024; // photos are sent as base64
-
 // Gemini proxy: the key lives only in the GEMINI_API_KEY Worker secret, never in the browser.
+// The logic is shared with the local dev server (see gemini.js).
 async function handleGemini(url, req, env) {
   const route = url.pathname.slice('/api/gemini/'.length);
-
-  if (route === 'status' && req.method === 'GET') return json({ configured: !!env.GEMINI_API_KEY });
-
-  if (!env.GEMINI_API_KEY) return json({ error: 'not_configured' }, 503);
-
-  if (route === 'verify' && req.method === 'GET') {
-    const res = await fetch(`${GEMINI_BASE}/models?pageSize=1`, { headers: { 'x-goog-api-key': env.GEMINI_API_KEY } });
-    if (res.ok) return json({ ok: true, message: 'Key works.' });
-    const body = await res.json().catch(() => null);
-    return json({ ok: false, message: body?.error?.message || `Google rejected the key (HTTP ${res.status}).` });
-  }
-
-  if (route === 'generate' && req.method === 'POST') {
-    const text = await req.text();
-    if (text.length > MAX_BODY_BYTES) return json({ error: 'too_large' }, 413);
-    const started = Date.now();
-    const res = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-      body: text,
-    });
-    // Latency and outcome of the upstream call (never the request content or the key)
-    let upstreamError;
-    let body = res.body;
-    if (!res.ok) {
-      const errText = await res.text();
-      upstreamError = errText.slice(0, 300);
-      body = errText;
-    }
-    log(res.ok ? 'info' : 'warn', { event: 'gemini_upstream', status: res.status, ms: Date.now() - started, requestBytes: text.length, error: upstreamError });
-    return new Response(body, {
-      status: res.status,
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-    });
-  }
-
-  return new Response('Not found', { status: 404 });
+  const bodyText = req.method === 'POST' ? await req.text() : '';
+  const r = await geminiProxy({ route, method: req.method, tier: url.searchParams.get('tier'), bodyText, env, log });
+  return new Response(r.body, {
+    status: r.status,
+    headers: { 'Content-Type': r.status === 404 ? 'text/plain' : 'application/json', 'Cache-Control': 'no-store' },
+  });
 }
 
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);

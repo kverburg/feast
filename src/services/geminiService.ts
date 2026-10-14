@@ -24,21 +24,31 @@ export class GeminiUnavailableError extends Error {}
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_MODEL = 'gemini-flash-latest';
+// Lighter model for tasks that tolerate it (annotation); limits are counted per model. Mirrors worker/gemini.js.
+const GEMINI_MODEL_LIGHT = 'gemini-flash-lite-latest';
+
+export type GeminiTier = 'default' | 'light';
 
 // A key saved in Settings is used directly; otherwise requests go through the worker's
 // /api/gemini proxy, which holds the shared key as a Cloudflare secret.
-async function geminiGenerate(body: unknown): Promise<any> {
+async function geminiGenerate(body: unknown, tier: GeminiTier = 'default'): Promise<any> {
   const key = getStoredApiKey();
   let res: Response;
   if (key) {
-    res = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify(body),
-    });
+    // The light model falls back to the default one when its name does not exist (404)
+    const models = tier === 'light' ? [GEMINI_MODEL_LIGHT, GEMINI_MODEL] : [GEMINI_MODEL];
+    for (let i = 0; ; i++) {
+      res = await fetch(`${GEMINI_BASE}/models/${models[i]}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 404 && i < models.length - 1) continue;
+      break;
+    }
   } else {
     try {
-      res = await fetch('/api/gemini/generate', {
+      res = await fetch(`/api/gemini/generate${tier === 'light' ? '?tier=light' : ''}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -200,11 +210,14 @@ Rules:
 }
 
 /** One prompt in, one parsed JSON object out. Throws like the other Gemini calls. */
-export async function geminiJson(prompt: string): Promise<any> {
-  const data = await geminiGenerate({
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
-  });
+export async function geminiJson(prompt: string, tier: GeminiTier = 'default'): Promise<any> {
+  const data = await geminiGenerate(
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+    },
+    tier
+  );
   const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
 }
