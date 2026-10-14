@@ -23,6 +23,8 @@ Notes
 - Never put a key in a file that is committed, in a `VITE_` variable (those are bundled into the app) or in chat.
 
 ## Models
+Background work (translating and annotating on the server) uses Gemini's **batch API**, see `BACKGROUND_WORK.md`: on a free-tier key that means a Flash-Lite model.
+
 `worker/gemini.js` (shared by the worker and the dev server) picks the model:
 
 | Task | Model | Variable (in `wrangler.toml`, `[vars]`) |

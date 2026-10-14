@@ -6,17 +6,23 @@ import type { Recipe, IngredientSection, InstructionStep, StepRef } from '../typ
 export type GeminiTier = 'default' | 'light';
 export type Generate = (body: unknown, tier?: GeminiTier) => Promise<any>;
 
+/** The request body for "answer this prompt with JSON". Also what a batch job takes per request. */
+export function jsonRequest(prompt: string, temperature = 0.1): unknown {
+  return {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature },
+  };
+}
+
+/** The JSON object in a Gemini response (as returned by a direct call or found in a batch result). */
+export function readJson(data: any): any {
+  const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+}
+
 /** One prompt in, one parsed JSON object out. */
 export async function generateJson(generate: Generate, prompt: string, tier: GeminiTier = 'default', temperature = 0.1): Promise<any> {
-  const data = await generate(
-    {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature },
-    },
-    tier
-  );
-  const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+  return readJson(await generate(jsonRequest(prompt, temperature), tier));
 }
 
 export interface GeminiTranslation {
@@ -31,10 +37,7 @@ export interface GeminiTranslation {
 // Translate a whole recipe in one call: Dutch recipes go to English, everything else goes to Dutch.
 // Structure, amounts and timers come from the original; only wording (and unit labels such as
 // cloves <-> teentjes) is taken from the model.
-export async function translateRecipe(
-  recipe: Partial<Recipe>,
-  generate: Generate
-): Promise<GeminiTranslation> {
+export function buildTranslationRequest(recipe: Partial<Recipe>): unknown {
   const source = {
     title: recipe.title || '',
     description: recipe.description || '',
@@ -58,12 +61,15 @@ Rules:
 Recipe JSON:
 ${JSON.stringify(source)}`;
 
-  const out = await generateJson(generate, prompt, 'default', 0.2);
+  return jsonRequest(prompt, 0.2);
+}
 
+/** Check a translation (the parsed JSON) against the recipe it was made for and merge it in. */
+export function parseTranslation(recipe: Partial<Recipe>, out: any): GeminiTranslation {
   const sections = recipe.ingredientSections || [];
   const steps = recipe.instructions || [];
   const valid =
-    typeof out.title === 'string' &&
+    typeof out?.title === 'string' &&
     (out.sourceLanguage === 'nl' || out.sourceLanguage === 'other') &&
     Array.isArray(out.ingredientSections) &&
     out.ingredientSections.length === sections.length &&
@@ -93,6 +99,10 @@ ${JSON.stringify(source)}`;
   };
 }
 
+export async function translateRecipe(recipe: Partial<Recipe>, generate: Generate): Promise<GeminiTranslation> {
+  return parseTranslation(recipe, readJson(await generate(buildTranslationRequest(recipe), 'default')));
+}
+
 // ---------------------------------------------------------------------------
 // Annotation: plural names and step quantities (see the description in annotationService)
 // ---------------------------------------------------------------------------
@@ -108,15 +118,8 @@ export interface AnnotationResult {
   refs: StepRef[][]; // per step, in order
 }
 
-export async function annotateVersion(
-  sections: IngredientSection[],
-  steps: InstructionStep[],
-  language: 'nl' | 'en',
-  generate: Generate,
-  tier: GeminiTier = 'light' // annotation is simple enough for the lighter model
-): Promise<AnnotationResult> {
+export function buildAnnotationRequest(sections: IngredientSection[], steps: InstructionStep[], language: 'nl' | 'en'): unknown {
   const items = sections.flatMap((s) => s.items);
-  const itemIds = new Set(items.map((i) => i.id));
 
   const prompt = `This is a recipe in ${language === 'nl' ? 'Dutch' : 'English'}. Annotate it and respond ONLY with JSON:
 {
@@ -138,7 +141,13 @@ ${items.map((i) => `${i.id} | ${i.amount} ${i.unit} ${i.name}`.trim()).join('\n'
 Steps:
 ${steps.map((st, n) => `${n + 1}. ${st.text}`).join('\n')}`;
 
-  const out = await generateJson(generate, prompt, tier);
+  return jsonRequest(prompt);
+}
+
+/** Check an annotation (the parsed JSON) against the recipe version it was made for. */
+export function parseAnnotation(sections: IngredientSection[], steps: InstructionStep[], out: any): AnnotationResult {
+  const items = sections.flatMap((s) => s.items);
+  const itemIds = new Set(items.map((i) => i.id));
   if (!out || !Array.isArray(out.ingredients) || !Array.isArray(out.steps) || out.steps.length !== steps.length) {
     throw new Error('Gemini returned an annotation with a different structure.');
   }
@@ -168,6 +177,16 @@ ${steps.map((st, n) => `${n + 1}. ${st.text}`).join('\n')}`;
 
   return { forms, refs };
 }
+export async function annotateVersion(
+  sections: IngredientSection[],
+  steps: InstructionStep[],
+  language: 'nl' | 'en',
+  generate: Generate,
+  tier: GeminiTier = 'light' // annotation is simple enough for the lighter model
+): Promise<AnnotationResult> {
+  return parseAnnotation(sections, steps, readJson(await generate(buildAnnotationRequest(sections, steps, language), tier)));
+}
+
 
 /** The sections and steps with the annotation written into them. */
 export function applyAnnotation(

@@ -4,7 +4,7 @@
 export class GeminiUnavailableError extends Error {}
 
 export class GeminiHttpError extends Error {
-  constructor(public status: number) {
+  constructor(public status: number, public detail?: string) {
     super(`Gemini API returned status ${status}`);
   }
 }
