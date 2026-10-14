@@ -3,6 +3,8 @@
 // the GEMINI_API_KEY Worker secret, or GEMINI_API_KEY in .env.local for local development.
 // It is never sent to the browser.
 
+import { GeminiHttpError } from '../src/shared/geminiErrors.ts';
+
 export const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export const DEFAULT_MODEL = 'gemini-flash-latest';
 // Lighter, cheaper model used for work that tolerates it (annotation). Limits are counted per
@@ -28,7 +30,7 @@ export async function geminiProxy({ route, method, tier, bodyText = '', env, log
   if (!env.GEMINI_API_KEY) return reply({ error: 'not_configured' }, 503);
 
   if (route === 'verify' && method === 'GET') {
-    const res = await fetch(`${GEMINI_BASE}/models?pageSize=1`, { headers: { 'x-goog-api-key': env.GEMINI_API_KEY } });
+    const res = await fetch(`${env.GEMINI_BASE || GEMINI_BASE}/models?pageSize=1`, { headers: { 'x-goog-api-key': env.GEMINI_API_KEY } });
     if (res.ok) return reply({ ok: true, message: 'Key works.' });
     const body = await res.json().catch(() => null);
     return reply({ ok: false, message: body?.error?.message || `Google rejected the key (HTTP ${res.status}).` });
@@ -39,7 +41,7 @@ export async function geminiProxy({ route, method, tier, bodyText = '', env, log
     const models = modelsFor(tier, env);
     for (let i = 0; i < models.length; i++) {
       const started = Date.now();
-      const res = await fetch(`${GEMINI_BASE}/models/${models[i]}:generateContent`, {
+      const res = await fetch(`${env.GEMINI_BASE || GEMINI_BASE}/models/${models[i]}:generateContent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
         body: bodyText,
@@ -61,4 +63,36 @@ export async function geminiProxy({ route, method, tier, bodyText = '', env, log
   }
 
   return reply('Not found', 404);
+}
+
+/**
+ * Call Gemini from the worker itself (for background work) and return the parsed response.
+ * Throws GeminiHttpError for a non-200 answer (so the caller can tell rate limits from a rejected key).
+ * Same model choice and 404 fallback as the proxy.
+ */
+export async function generateContent(env, body, tier, log = () => {}) {
+  const bodyText = JSON.stringify(body);
+  const models = modelsFor(tier, env);
+  for (let i = 0; i < models.length; i++) {
+    const started = Date.now();
+    const res = await fetch(`${env.GEMINI_BASE || GEMINI_BASE}/models/${models[i]}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+      body: bodyText,
+    });
+    const text = await res.text();
+    log(res.ok ? 'info' : 'warn', {
+      event: 'gemini_upstream',
+      source: 'background',
+      model: models[i],
+      status: res.status,
+      ms: Date.now() - started,
+      requestBytes: bodyText.length,
+      error: res.ok ? undefined : text.slice(0, 300),
+    });
+    if (res.status === 404 && i < models.length - 1) continue;
+    if (!res.ok) throw new GeminiHttpError(res.status);
+    return JSON.parse(text);
+  }
+  throw new GeminiHttpError(404);
 }

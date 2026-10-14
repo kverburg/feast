@@ -1,6 +1,6 @@
 // Which recipes wait for background work (translation, annotation), and how a finished result is
 // applied. Shared by the app and the worker, so both agree on what "needs work" and "still the same recipe" mean.
-import { Recipe } from '../types/recipe';
+import type { Recipe } from '../types/recipe';
 import { ANNOTATION_VERSION, AnnotationResult, GeminiTranslation, applyAnnotation } from './geminiTasks';
 
 export const hashValue = (value: unknown): string => {

@@ -1,7 +1,7 @@
 // Gemini tasks that run in the app and in the worker. They know nothing about where the request goes:
 // the caller passes `generate`, which sends a request body to Gemini and returns the parsed response
 // (the app goes through its proxy or straight to Google, the worker straight to Google).
-import { Recipe, IngredientSection, InstructionStep, StepRef } from '../types/recipe';
+import type { Recipe, IngredientSection, InstructionStep, StepRef } from '../types/recipe';
 
 export type GeminiTier = 'default' | 'light';
 export type Generate = (body: unknown, tier?: GeminiTier) => Promise<any>;
