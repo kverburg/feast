@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Recipe, ShoppingItem } from './types/recipe';
 import {
   getStoredRecipes,
@@ -51,10 +51,109 @@ export function App() {
   };
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(false);
 
+  // ---- Browser history: Back/Forward move between the list, a recipe, tabs and the import dialog ----
+  type Tab = 'recipes' | 'meals' | 'shopping' | 'settings';
+  interface NavState {
+    tab: Tab;
+    recipeId: string | null;
+    modal: 'form' | 'import' | 'cook' | null;
+  }
+  interface HistoryEntry {
+    nav: NavState;
+    idx: number;
+    prevKey: string | null;
+  }
+  const nav: NavState = {
+    tab: currentTab,
+    recipeId: selectedRecipe?.id ?? null,
+    modal: isFormOpen ? 'form' : isImportOpen ? 'import' : cookModeState ? 'cook' : null,
+  };
+  const navKey = JSON.stringify(nav);
+  const initialHashRef = useRef(window.location.hash); // read before the history effect rewrites the URL
+  const deepLinkHandledRef = useRef(false);
+  // State a Back/Forward (or the deep link) is about to apply; the history effect must not react to it
+  const expectedNavRef = useRef<{ key: string; until: number } | null>(null);
+  const expectNav = (key: string) => {
+    expectedNavRef.current = { key, until: Date.now() + 600 };
+  };
+  const recipesRef = useRef<Recipe[]>([]);
+  recipesRef.current = recipes;
+
+  const hashFor = (n: NavState) => (n.recipeId ? `#/recipe/${n.recipeId}` : n.tab === 'recipes' ? '#/' : `#/${n.tab}`);
+
+  // State -> history: new views push an entry; going back to the previous view uses history.back()
+  useEffect(() => {
+    const expected = expectedNavRef.current;
+    if (expected) {
+      if (Date.now() < expected.until) {
+        if (expected.key === navKey) expectedNavRef.current = null;
+        return;
+      }
+      expectedNavRef.current = null;
+    }
+    const cur = window.history.state as HistoryEntry | null;
+    if (!cur || !cur.nav) {
+      window.history.replaceState({ nav, idx: 0, prevKey: null } as HistoryEntry, '', hashFor(nav));
+      return;
+    }
+    if (JSON.stringify(cur.nav) === navKey) return;
+    if (cur.prevKey === navKey) {
+      expectNav(navKey);
+      window.history.back();
+      return;
+    }
+    window.history.pushState(
+      { nav, idx: cur.idx + 1, prevKey: JSON.stringify(cur.nav) } as HistoryEntry,
+      '',
+      hashFor(nav)
+    );
+  }, [navKey]);
+
+  // History -> state: Back/Forward
+  useEffect(() => {
+    const onPopState = (e: PopStateEvent) => {
+      const target: NavState = (e.state as HistoryEntry | null)?.nav ?? { tab: 'recipes', recipeId: null, modal: null };
+      const recipe = target.recipeId ? recipesRef.current.find((r) => r.id === target.recipeId) ?? null : null;
+      // Forms and cook mode need data that history cannot restore, so they close; the import dialog reopens.
+      const applied: NavState = { tab: target.tab, recipeId: recipe?.id ?? null, modal: target.modal === 'import' ? 'import' : null };
+      expectNav(JSON.stringify(applied));
+      setCurrentTab(applied.tab);
+      setSelectedRecipe(recipe);
+      setIsImportOpen(applied.modal === 'import');
+      setIsFormOpen(false);
+      setCookModeState(null);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Opening a recipe starts at its top
+  useEffect(() => {
+    if (selectedRecipe?.id) window.scrollTo(0, 0);
+  }, [selectedRecipe?.id]);
+
   // Load stored data on initial mount
   useEffect(() => {
     const loadedRecipes = getStoredRecipes();
     setRecipes(loadedRecipes);
+
+    // Opened on a deep link (#/recipe/<id> or #/meals ...): the list stays one Back away
+    const hash = initialHashRef.current;
+    const recipeMatch = hash.match(/^#\/recipe\/(.+)$/);
+    const tabMatch = hash.match(/^#\/(meals|shopping|settings)$/);
+    const deepRecipe = recipeMatch ? loadedRecipes.find((r) => r.id === decodeURIComponent(recipeMatch[1])) : undefined;
+    if ((deepRecipe || tabMatch) && !deepLinkHandledRef.current) {
+      deepLinkHandledRef.current = true;
+      const listNav: NavState = { tab: 'recipes', recipeId: null, modal: null };
+      const target: NavState = deepRecipe
+        ? { tab: 'recipes', recipeId: deepRecipe.id, modal: null }
+        : { tab: tabMatch![1] as Tab, recipeId: null, modal: null };
+      window.history.replaceState({ nav: listNav, idx: 0, prevKey: null } as HistoryEntry, '', '#/');
+      window.history.pushState({ nav: target, idx: 1, prevKey: JSON.stringify(listNav) } as HistoryEntry, '', hashFor(target));
+      expectNav(JSON.stringify(target));
+      setCurrentTab(target.tab);
+      if (deepRecipe) setSelectedRecipe(deepRecipe);
+    }
 
     const loadedShopping = getStoredShoppingList();
     setShoppingList(loadedShopping);

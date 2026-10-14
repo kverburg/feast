@@ -256,6 +256,35 @@ export async function parsePhotoToRecipe(
 }
 
 // Extract Recipe JSON object from HTML string (finds Schema.org JSON-LD or Microdata)
+// Visible text of an HTML page: no scripts, styles or markup, one block per line.
+export function htmlToText(html: string): string {
+  const stripped = html
+    .replace(/<(script|style|noscript|head|svg)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<\/(p|div|li|ul|ol|h[1-6]|tr|section|article)>|<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ');
+  return stripped
+    .split('\n')
+    .map((line) => decodeHtmlEntities(line))
+    .filter(Boolean)
+    .join('\n');
+}
+
+// Bot-protection and error pages that come back instead of the real recipe page.
+const BLOCKED_PAGE = /just a moment|checking your browser|verify you are human|enable javascript and cookies|attention required|access denied|captcha|403 forbidden|error 403|cf-chl|ddos protection/i;
+
+export function looksLikeBlockedPage(text: string): boolean {
+  const head = text.slice(0, 3000);
+  return BLOCKED_PAGE.test(head) && text.length < 20000;
+}
+
+// A parse result is only worth showing when it holds real recipe content, not placeholders.
+export function isUsableRecipe(r: Partial<Recipe> | null | undefined): r is Partial<Recipe> {
+  if (!r) return false;
+  const items = (r.ingredientSections || []).flatMap((sec) => sec.items).filter((i) => i.name !== 'See source recipe' && i.name !== 'Sample Ingredient');
+  const steps = (r.instructions || []).filter((st) => !/^Follow (cooking )?instructions as per recipe source/.test(st.text));
+  return items.length >= 2 && !looksLikeBlockedPage(`${r.title || ''}`) && (steps.length >= 1 || items.length >= 4);
+}
+
 export function parseHtmlContentToRecipe(htmlContent: string, sourceUrl?: string): Partial<Recipe> | null {
   try {
     // Unwrap JSON wrapper if proxy returned { contents: "<html>..." }
@@ -373,8 +402,8 @@ export function parseHtmlContentToRecipe(htmlContent: string, sourceUrl?: string
       }
     }
 
-    // 2. DOM Scraper Fallback if JSON-LD tag was not present
-    return parseRawTextToRecipe(htmlContent);
+    // 2. Text fallback if there was no usable JSON-LD: scan the visible text, not the page source
+    return parseRawTextToRecipe(htmlToText(htmlContent));
   } catch (error) {
     console.error('HTML parsing error:', error);
     return null;
@@ -578,17 +607,17 @@ function parseJinaMarkdownToRecipe(markdown: string, sourceUrl?: string): Partia
 // Fallback: HTML proxies for non-protected sites
 // ---------------------------------------------------------------------------
 export async function parseUrlToRecipe(url: string): Promise<Partial<Recipe>> {
+  let blocked = false; // a bot-protection page came back instead of the recipe
   // --- Primary: Jina AI reader (bypasses bot protection, free, no key needed) ---
   // 1) Ask for the raw HTML so the site's structured recipe data (JSON-LD) can be used.
   try {
     const htmlRes = await fetch(`https://r.jina.ai/${url}`, { headers: { 'X-Return-Format': 'html' } });
     if (htmlRes.ok) {
       const html = await htmlRes.text();
-      if (html.includes('ld+json')) {
+      if (looksLikeBlockedPage(html)) blocked = true;
+      else if (html.includes('ld+json')) {
         const parsed = parseHtmlContentToRecipe(html, url);
-        if (parsed && parsed.title && parsed.title !== 'Imported Recipe' && parsed.ingredientSections?.some(s => s.items.length > 0)) {
-          return parsed;
-        }
+        if (isUsableRecipe(parsed) && parsed.title !== 'Imported Recipe') return parsed;
       }
     }
   } catch (_) { /* fall through to markdown */ }
@@ -600,11 +629,10 @@ export async function parseUrlToRecipe(url: string): Promise<Partial<Recipe>> {
     });
     if (jinaRes.ok) {
       const markdown = await jinaRes.text();
-      if (markdown && markdown.length > 300) {
+      if (looksLikeBlockedPage(markdown)) blocked = true;
+      else if (markdown && markdown.length > 300) {
         const parsed = parseJinaMarkdownToRecipe(markdown, url);
-        if (parsed && ((parsed.ingredientSections?.some(s => s.items.length > 0)) || (parsed.instructions?.length ?? 0) > 1)) {
-          return parsed;
-        }
+        if (isUsableRecipe(parsed)) return parsed;
       }
     }
   } catch (_) { /* fall through to HTML proxies */ }
@@ -635,15 +663,20 @@ export async function parseUrlToRecipe(url: string): Promise<Partial<Recipe>> {
     try {
       const text = await proxyFn(url);
       if (text && text.length > 200) {
-        const parsed = parseHtmlContentToRecipe(text, url);
-        if (parsed && (parsed.ingredientSections?.length || parsed.instructions?.length)) {
-          return parsed;
+        if (looksLikeBlockedPage(text)) {
+          blocked = true;
+          continue;
         }
+        const parsed = parseHtmlContentToRecipe(text, url);
+        if (isUsableRecipe(parsed)) return parsed;
       }
     } catch (_) { /* try next */ }
   }
 
-  throw new Error('Unable to automatically fetch this URL. Please open it in a new tab, copy the page content, and use the "Paste HTML / Text" tab to import it.');
+  if (blocked) {
+    throw new Error('This site blocks automated access (bot protection). Open the page in your browser, select all and copy it, then use the "Paste HTML / Text" tab.');
+  }
+  throw new Error('Could not find a recipe on this page. Open it in a new tab, copy the page content, and use the "Paste HTML / Text" tab to import it.');
 }
 
 
