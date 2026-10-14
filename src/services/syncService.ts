@@ -4,6 +4,8 @@
 // Everything lives in KV behind Cloudflare Access, so only the allowed users can read it.
 // If /api/state is unavailable (e.g. local dev), the app silently stays local-only.
 
+import { reportEvent } from './telemetry';
+
 const SYNCED_KEYS: Record<string, string> = {
   gourmet_craft_recipes_v1: 'recipes',
   gourmet_craft_shopping_v1: 'shopping',
@@ -51,6 +53,7 @@ const push = async (keepalive = false) => {
       keepalive,
     });
     if (res.status === 409) {
+      reportEvent('sync_conflict', 'warn', 'Another device saved first; reloading the latest version');
       const remote = await res.json();
       writeLocal(remote.data ?? {});
       rev = remote.rev;

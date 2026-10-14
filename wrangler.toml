@@ -10,6 +10,11 @@ routes = [{ pattern = "feast.kmverburg.nl", custom_domain = true }]
 
 # Static Vite build output; unknown paths fall back to index.html (SPA).
 # /api/* must hit the worker first, otherwise the SPA fallback would answer it.
+# Workers Logs: every request and console.log line is searchable in the dashboard (7 days)
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"

@@ -27,12 +27,22 @@ async function handleGemini(url, req, env) {
   if (route === 'generate' && req.method === 'POST') {
     const text = await req.text();
     if (text.length > MAX_BODY_BYTES) return json({ error: 'too_large' }, 413);
+    const started = Date.now();
     const res = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
       body: text,
     });
-    return new Response(res.body, {
+    // Latency and outcome of the upstream call (never the request content or the key)
+    let upstreamError;
+    let body = res.body;
+    if (!res.ok) {
+      const errText = await res.text();
+      upstreamError = errText.slice(0, 300);
+      body = errText;
+    }
+    log(res.ok ? 'info' : 'warn', { event: 'gemini_upstream', status: res.status, ms: Date.now() - started, requestBytes: text.length, error: upstreamError });
+    return new Response(body, {
       status: res.status,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
@@ -106,36 +116,107 @@ async function handleActivity(req, env) {
   return new Response('Method not allowed', { status: 405 });
 }
 
+// Structured logs: with [observability] enabled in wrangler.toml they land in Workers Logs
+// (dashboard > Workers & Pages > feast > Observability), where every field below is searchable.
+const log = (level, fields) => {
+  const line = { app: 'feast', ...fields };
+  if (level === 'error') console.error(line);
+  else if (level === 'warn') console.warn(line);
+  else console.log(line);
+};
+
+const MAX_CLIENT_EVENTS_STORED = 1000;
+const clip = (v, n) => (typeof v === 'string' ? v.slice(0, n) : v === undefined || v === null ? undefined : String(v).slice(0, n));
+
+// Events reported by the app itself: JS errors and the outcome of background jobs.
+// They go to Workers Logs (7 days) and to a ring buffer in KV ('clientlog', last 1000)
+// so they can be read later with `wrangler kv key get clientlog`.
+async function handleClientLog(req, env) {
+  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+  const text = await req.text();
+  if (text.length > 64 * 1024) return json({ error: 'too_large' }, 413);
+  let body;
+  try { body = JSON.parse(text); } catch { return json({ error: 'bad json' }, 400); }
+  if (!body || !Array.isArray(body.events)) return json({ error: 'bad body' }, 400);
+
+  const events = body.events.slice(0, 50).map((e) => ({
+    ts: typeof e.ts === 'number' ? e.ts : Date.now(),
+    type: clip(e.type, 40) || 'unknown',
+    level: ['info', 'warn', 'error'].includes(e.level) ? e.level : 'info',
+    message: clip(e.message, 500),
+    data: e.data && typeof e.data === 'object' ? JSON.parse(JSON.stringify(e.data, (k, v) => (typeof v === 'string' ? v.slice(0, 300) : v))) : undefined,
+    count: typeof e.count === 'number' ? e.count : 1,
+    device: clip(e.device, 20),
+    version: clip(e.version, 20),
+    page: clip(e.page, 80),
+  }));
+
+  for (const e of events) log(e.level, { event: 'client', ...e });
+
+  const raw = await env.FEAST.get('clientlog');
+  const current = raw ? JSON.parse(raw) : [];
+  await env.FEAST.put('clientlog', JSON.stringify([...events.reverse(), ...current].slice(0, MAX_CLIENT_EVENTS_STORED)));
+  return json({ ok: true, stored: events.length });
+}
+
+async function route(req, env) {
+  const url = new URL(req.url);
+  const isState = url.pathname === '/api/state';
+  const isGemini = url.pathname.startsWith('/api/gemini/');
+  const isImage = url.pathname === '/api/image' || url.pathname.startsWith('/api/image/');
+  const isActivity = url.pathname === '/api/activity';
+  const isClientLog = url.pathname === '/api/log';
+  if (!isState && !isGemini && !isImage && !isActivity && !isClientLog) return env.ASSETS.fetch(req);
+
+  // Cloudflare Access adds this header after login. Without it, refuse.
+  if (!req.headers.get('Cf-Access-Jwt-Assertion')) return new Response('Forbidden', { status: 403 });
+
+  if (isGemini) return handleGemini(url, req, env);
+  if (isImage) return handleImage(url, req, env);
+  if (isActivity) return handleActivity(req, env);
+  if (isClientLog) return handleClientLog(req, env);
+
+  const raw = await env.FEAST.get('state');
+  const current = raw ? JSON.parse(raw) : { rev: 0, data: null };
+
+  if (req.method === 'GET') return json(current);
+
+  if (req.method === 'PUT') {
+    let body;
+    try { body = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
+    if (!body || typeof body.data !== 'object' || body.data === null) return json({ error: 'bad body' }, 400);
+    if (body.rev !== current.rev) {
+      log('warn', { event: 'state_conflict', clientRev: body.rev, serverRev: current.rev });
+      return json(current, 409); // someone saved in between
+    }
+    const next = { rev: current.rev + 1, data: body.data };
+    await env.FEAST.put('state', JSON.stringify(next));
+    return json({ rev: next.rev });
+  }
+  return new Response('Method not allowed', { status: 405 });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    const isState = url.pathname === '/api/state';
-    const isGemini = url.pathname.startsWith('/api/gemini/');
-    const isImage = url.pathname === '/api/image' || url.pathname.startsWith('/api/image/');
-    const isActivity = url.pathname === '/api/activity';
-    if (!isState && !isGemini && !isImage && !isActivity) return env.ASSETS.fetch(req);
-
-    // Cloudflare Access adds this header after login. Without it, refuse.
-    if (!req.headers.get('Cf-Access-Jwt-Assertion')) return new Response('Forbidden', { status: 403 });
-
-    if (isGemini) return handleGemini(url, req, env);
-    if (isImage) return handleImage(url, req, env);
-    if (isActivity) return handleActivity(req, env);
-
-    const raw = await env.FEAST.get('state');
-    const current = raw ? JSON.parse(raw) : { rev: 0, data: null };
-
-    if (req.method === 'GET') return json(current);
-
-    if (req.method === 'PUT') {
-      let body;
-      try { body = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
-      if (!body || typeof body.data !== 'object' || body.data === null) return json({ error: 'bad body' }, 400);
-      if (body.rev !== current.rev) return json(current, 409); // someone saved in between
-      const next = { rev: current.rev + 1, data: body.data };
-      await env.FEAST.put('state', JSON.stringify(next));
-      return json({ rev: next.rev });
+    const started = Date.now();
+    try {
+      const res = await route(req, env);
+      if (url.pathname.startsWith('/api/')) {
+        // One line per API call: route, status and time. 4xx/5xx are warnings so they stand out.
+        const path = url.pathname.startsWith('/api/image/') ? '/api/image/:id' : url.pathname;
+        log(res.status >= 500 ? 'error' : res.status >= 400 ? 'warn' : 'info', {
+          event: 'request',
+          method: req.method,
+          path,
+          status: res.status,
+          ms: Date.now() - started,
+        });
+      }
+      return res;
+    } catch (e) {
+      log('error', { event: 'unhandled_error', path: url.pathname, method: req.method, message: String(e && e.message ? e.message : e), stack: e && e.stack ? String(e.stack).split('\n').slice(0, 4).join(' | ') : undefined });
+      return json({ error: 'internal_error' }, 500);
     }
-    return new Response('Method not allowed', { status: 405 });
   },
 };
