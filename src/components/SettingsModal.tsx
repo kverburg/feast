@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { getStoredApiKey, saveStoredApiKey } from '../services/storageService';
 import { verifyGeminiKey, getGeminiStatus } from '../services/geminiService';
 import { startTranslationQueue } from '../services/translationService';
-import { ActivityLog } from './ActivityLog';
 import { startLog, finishLog } from '../services/activityLog';
 import { showToast } from '../services/toast';
-import { Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
+import { Activity, Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
 import { Recipe } from '../types/recipe';
 import { parseCookmateXml } from '../services/cookmateImportService';
 
@@ -17,10 +16,12 @@ interface SettingsModalProps {
   toggleTheme: () => void;
   voiceEnabled: boolean;
   onToggleVoice: (enabled: boolean) => void;
+  onOpenActivityLog: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   recipes,
+  onOpenActivityLog,
   onImportBackup,
   onResetSeed,
   theme,
@@ -284,7 +285,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </form>
         </div>
 
-        <ActivityLog />
+        <div className="settings-card card">
+          <div className="setting-row">
+            <div>
+              <span className="setting-name">Activity log</span>
+              <p className="setting-desc">
+                Imports, translations and AI re-parses: when they ran, what was used and how they ended.
+              </p>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={onOpenActivityLog}>
+              <Activity size={16} />
+              <span>Open activity log</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <style>{`
