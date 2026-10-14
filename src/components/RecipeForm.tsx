@@ -234,7 +234,7 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
         instructionsEn: undefined,
         translationVersion: undefined,
         annotationVersion: undefined,
-      });
+      }, true); // you just re-parsed it: translate it now, not in the background batch
     }
 
     onSave(recipe);

@@ -57,6 +57,9 @@ export interface Recipe {
   translationVersion?: number;
   // 1 = plural forms and step references were added (see annotationService)
   annotationVersion?: number;
+  // Freshly imported or re-parsed by you: translate and annotate right away (direct calls) instead of in the
+  // background batch. Cleared once annotation is done.
+  liveWork?: boolean;
   // True while the recipe waits in the translation queue (Dutch -> English, anything else -> Dutch)
   translationPending?: boolean;
   // Fingerprint of the content when it was queued, to notice hand edits while waiting

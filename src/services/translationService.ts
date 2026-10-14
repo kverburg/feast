@@ -214,7 +214,10 @@ async function runServerQueue(first: ServerWork): Promise<void> {
       return;
     }
     setQueueError(null);
-    setState(status?.state === 'waiting' ? 'waiting' : 'working', status?.state === 'waiting' ? status.note : undefined);
+    setState(
+      status?.state === 'waiting' ? 'waiting' : 'working',
+      status?.state === 'waiting' ? status.note : info.batch?.off || undefined
+    );
 
     const localWork = computeWorkList(getStoredRecipes());
     if (localWork.length === 0 && info.pending === 0) return; // nothing waits, anywhere

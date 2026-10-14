@@ -196,6 +196,7 @@ async function processJob(job: ImportJob): Promise<void> {
     const title = parsed.title || 'Imported Recipe';
     const image = await findImageForRecipe(title, category, parsed.image, parsed.tags || []);
 
+    // live: you are waiting for this one, so it is translated and annotated now, not in the background batch
     const recipe: Recipe = withPendingTranslation({
       id: `imported-${Date.now()}`,
       title,
@@ -211,7 +212,7 @@ async function processJob(job: ImportJob): Promise<void> {
       tags: parsed.tags || ['Imported'],
       isFavorite: false,
       createdAt: new Date().toISOString(),
-    });
+    }, true);
 
     saveStoredRecipes([recipe, ...getStoredRecipes()]);
     finishLog(logId, 'done', { label: title, method, detail: `${recipe.ingredientSections.flatMap((s) => s.items).length} ingredients, ${recipe.instructions.length} steps` });

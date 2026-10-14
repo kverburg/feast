@@ -65,7 +65,14 @@ async function handleWork(url, req, env, ctx) {
     const [doc, pending] = enabled ? await Promise.all([readWork(env), pendingEntries(env)]) : [null, []];
     // Previews have no cron: while the app is open, polling moves the work along instead
     if (enabled && env.PUMP_ON_POLL === 'true' && pending.length > 0 && ctx) ctx.waitUntil(processWork(env, { log }));
-    return json({ enabled, status: doc ? doc.status : null, patches: doc ? doc.patches : [], pending: pending.length });
+    const batchOff = doc && doc.batchOff && doc.batchOff.until > Date.now() ? doc.batchOff.note : null;
+    return json({
+      enabled,
+      status: doc ? doc.status : null,
+      patches: doc ? doc.patches : [],
+      pending: pending.length,
+      batch: { active: doc ? doc.batches.length : 0, off: env.GEMINI_BATCH === 'off' ? 'Batch is switched off; using direct calls' : batchOff },
+    });
   }
 
   return new Response('Method not allowed', { status: 405 });
