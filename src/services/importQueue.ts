@@ -215,7 +215,7 @@ async function processJob(job: ImportJob): Promise<void> {
     }, true);
 
     saveStoredRecipes([recipe, ...getStoredRecipes()]);
-    finishLog(logId, 'done', { label: title, method, detail: `${recipe.ingredientSections.flatMap((s) => s.items).length} ingredients, ${recipe.instructions.length} steps` });
+    finishLog(logId, 'done', { label: title, recipeId: recipe.id, method, detail: `${recipe.ingredientSections.flatMap((s) => s.items).length} ingredients, ${recipe.instructions.length} steps` });
     jobs = jobs.filter((j) => j.id !== job.id);
     photoPayloads.delete(job.id);
     persist();

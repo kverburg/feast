@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Activity, ArrowLeft, Loader2, RotateCcw, X, Trash2, RefreshCw } from 'lucide-react';
 import { LogEntry, clearLog, getLog, pullActivity, subscribeLog } from '../services/activityLog';
 import { QueueStatus, getQueueStatus, subscribeQueueStatus } from '../services/translationService';
+import { fetchServerWork } from '../services/serverWork';
+import { getStoredRecipes } from '../services/storageService';
 import { ImportJob, dismissImport, getImportJobs, retryImport, subscribeImportJobs } from '../services/importQueue';
 
 const KIND_LABEL: Record<LogEntry['kind'], string> = {
@@ -24,14 +26,26 @@ const PAGE_SIZE = 100;
 
 interface ActivityLogProps {
   onBack: () => void;
+  onOpenRecipe: (recipeId: string) => void;
 }
 
-export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack }) => {
+// A recipe whose requests are with Gemini's batch queue and not answered yet
+interface WaitingItem {
+  key: string;
+  recipeId: string;
+  kind: 'translate' | 'annotate';
+  label: string;
+  submittedAt: number;
+  model: string;
+}
+
+export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack, onOpenRecipe }) => {
   const [entries, setEntries] = useState<LogEntry[]>(getLog());
   const [jobs, setJobs] = useState<ImportJob[]>(getImportJobs());
   const [shown, setShown] = useState(PAGE_SIZE);
   const [refreshing, setRefreshing] = useState(false);
   const [queue, setQueue] = useState<QueueStatus>(getQueueStatus());
+  const [waiting, setWaiting] = useState<WaitingItem[]>([]);
 
   useEffect(() => {
     const unsubscribeLog = subscribeLog(() => setEntries([...getLog()]));
@@ -39,12 +53,57 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack }) => {
     const unsubscribeQueue = subscribeQueueStatus(() => setQueue(getQueueStatus()));
     setQueue(getQueueStatus());
     void pullActivity(); // bring in what other devices logged
+
+    // What the server has sent to Gemini's batch queue and is still waiting for
+    let cancelled = false;
+    const loadWaiting = async () => {
+      const info = await fetchServerWork();
+      if (cancelled || !info) return;
+      const titles = new Map(getStoredRecipes().map((r) => [r.id, r.title]));
+      setWaiting(
+        (info.batches || []).flatMap((b) =>
+          b.items.map((item) => {
+            const [letter, recipeId] = item.key.split('|');
+            return {
+              key: item.key,
+              recipeId,
+              kind: letter.toLowerCase() === 't' ? ('translate' as const) : ('annotate' as const),
+              label: item.label || titles.get(recipeId) || recipeId,
+              submittedAt: b.submittedAt,
+              model: b.model,
+            };
+          })
+        )
+      );
+    };
+    void loadWaiting();
+    const waitingTimer = window.setInterval(loadWaiting, 30000);
     return () => {
       unsubscribeLog();
       unsubscribeJobs();
       unsubscribeQueue();
+      cancelled = true;
+      window.clearInterval(waitingTimer);
     };
   }, []);
+
+  const knownRecipes = new Set(getStoredRecipes().map((r) => r.id));
+  // A row about a recipe that still exists opens it (also with the keyboard)
+  const rowLink = (recipeId?: string) =>
+    recipeId && knownRecipes.has(recipeId)
+      ? {
+          role: 'link' as const,
+          tabIndex: 0,
+          title: 'Open this recipe',
+          onClick: () => onOpenRecipe(recipeId),
+          onKeyDown: (ev: React.KeyboardEvent) => {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+              ev.preventDefault();
+              onOpenRecipe(recipeId);
+            }
+          },
+        }
+      : {};
 
   const refresh = async () => {
     setRefreshing(true);
@@ -140,12 +199,30 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack }) => {
         </div>
       </div>
 
-      {entries.length === 0 ? (
+      {entries.length === 0 && waiting.length === 0 ? (
         <p className="setting-desc">Nothing yet. Imports and translations will show up here.</p>
       ) : (
         <div className="activity-list">
+          {waiting.map((w) => (
+            <div
+              key={w.key}
+              className={`activity-row waiting ${knownRecipes.has(w.recipeId) ? 'clickable' : ''}`}
+              {...rowLink(w.recipeId)}
+            >
+              <div className="activity-main">
+                <span className={`activity-kind kind-${w.kind}`}>{KIND_LABEL[w.kind]}</span>
+                <span className="activity-label">{w.label}</span>
+                <span className="activity-status status-waiting">waiting on response</span>
+              </div>
+              <div className="activity-meta">
+                <span>sent {formatTime(new Date(w.submittedAt).toISOString())}</span>
+                <span>Gemini batch ({w.model})</span>
+              </div>
+              <div className="activity-detail">The request is with Gemini's batch queue. Answers usually take minutes, at most a day.</div>
+            </div>
+          ))}
           {entries.slice(0, shown).map((e) => (
-            <div key={e.id} className={`activity-row ${e.status}`}>
+            <div key={e.id} className={`activity-row ${e.status} ${e.recipeId && knownRecipes.has(e.recipeId) ? 'clickable' : ''}`} {...rowLink(e.recipeId)}>
               <div className="activity-main">
                 <span className={`activity-kind kind-${e.kind}`}>{KIND_LABEL[e.kind]}</span>
                 <span className="activity-label">{e.label}</span>
@@ -198,7 +275,11 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ onBack }) => {
         .activity-status { font-size: 0.75rem; font-weight: 700; text-transform: capitalize; }
         .status-done { color: #10b981; }
         .status-failed { color: #ef4444; }
-        .status-running, .status-retrying { color: var(--accent-primary); }
+        .status-running, .status-retrying, .status-waiting { color: var(--accent-primary); }
+        .activity-row.waiting { border-style: dashed; }
+        .activity-row.clickable { cursor: pointer; }
+        .activity-row.clickable:hover { border-color: var(--accent-primary); }
+        .activity-row.clickable:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
         .activity-meta { display: flex; gap: 0.75rem; flex-wrap: wrap; color: var(--text-dim); font-size: 0.78rem; margin-top: 0.2rem; }
         .activity-detail { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem; overflow-wrap: anywhere; }
       `}</style>

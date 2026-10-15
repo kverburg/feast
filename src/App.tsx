@@ -410,7 +410,19 @@ export function App() {
         )}
 
         {currentTab === 'settings' && settingsSub === 'activity' && (
-          <ActivityLog onBack={() => setSettingsSub(null)} />
+          <ActivityLog
+            onBack={() => setSettingsSub(null)}
+            onOpenRecipe={(id) => {
+              const recipe = getStoredRecipes().find((r) => r.id === id);
+              if (!recipe) {
+                showToast({ kind: 'info', message: 'That recipe no longer exists.' });
+                return;
+              }
+              setSettingsSub(null);
+              setCurrentTab('recipes');
+              setSelectedRecipe(recipe);
+            }}
+          />
         )}
 
         {currentTab === 'settings' && settingsSub !== 'activity' && (

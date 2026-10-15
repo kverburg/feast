@@ -71,6 +71,8 @@ async function handleWork(url, req, env, ctx) {
       status: doc ? doc.status : null,
       patches: doc ? doc.patches : [],
       pending: pending.length,
+      // recipes whose requests are with Gemini's batch queue, so the app can show them as "waiting on response"
+      batches: doc ? doc.batches.map((b) => ({ name: b.name, model: b.model, submittedAt: b.submittedAt, items: b.items.map((i) => ({ key: i.key, label: i.label })) })) : [],
       batch: { active: doc ? doc.batches.length : 0, off: env.GEMINI_BATCH === 'off' ? 'Batch is switched off; using direct calls' : batchOff },
     });
   }
