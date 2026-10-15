@@ -3,7 +3,35 @@ import { Recipe, IngredientSection, InstructionStep } from '../types/recipe';
 import { uploadRecipeImage } from '../services/imageService';
 import { reparseFromSource } from '../services/reparseService';
 import { withPendingTranslation } from '../services/translationService';
-import { Plus, Trash2, Layers, Clock, Users, X, Save, Sparkles, Image as ImageIcon, Wand2 } from 'lucide-react';
+import { Plus, Trash2, Layers, Clock, Users, X, Save, Sparkles, Image as ImageIcon, Wand2, GripVertical } from 'lucide-react';
+import {
+  DndContext, DragEndEvent, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useDroppable, useSensor, useSensors,
+} from '@dnd-kit/core';
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
+// One draggable ingredient row; the grip is the only drag handle so inputs stay usable on touch
+const SortableItem: React.FC<{ id: string; children: React.ReactNode }> = ({ id, children }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      className="item-row"
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1, zIndex: isDragging ? 5 : undefined, position: 'relative' }}
+    >
+      <button type="button" className="item-handle" aria-label="Drag to reorder" title="Drag to reorder" {...attributes} {...listeners}>
+        <GripVertical size={16} />
+      </button>
+      {children}
+    </div>
+  );
+};
+
+// Lets an ingredient be dropped on a section even when it has no rows left
+const SectionDropZone: React.FC<{ id: string; children: React.ReactNode }> = ({ id, children }) => {
+  const { setNodeRef } = useDroppable({ id: `sec:${id}` });
+  return <div ref={setNodeRef} className="items-list-editor">{children}</div>;
+};
 
 interface RecipeFormProps {
   initialRecipe?: Partial<Recipe>;
@@ -78,9 +106,71 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
     setSections(prev => prev.map(s => s.id === sectionId ? { ...s, title } : s));
   };
 
+  const [sectionToRemove, setSectionToRemove] = useState<string | null>(null);
+
   const handleRemoveSection = (sectionId: string) => {
     if (sections.length <= 1) return;
-    setSections(prev => prev.filter(s => s.id !== sectionId));
+    const sec = sections.find(s => s.id === sectionId);
+    if (sec && sec.items.some(i => i.name.trim() || i.amount)) setSectionToRemove(sectionId);
+    else setSections(prev => prev.filter(s => s.id !== sectionId));
+  };
+
+  // keepIngredients moves the rows to the general (first remaining) section
+  const confirmRemoveSection = (keepIngredients: boolean) => {
+    const id = sectionToRemove;
+    setSectionToRemove(null);
+    if (!id) return;
+    setSections(prev => {
+      const removed = prev.find(s => s.id === id);
+      const rest = prev.filter(s => s.id !== id);
+      if (!keepIngredients || !removed || rest.length === 0) return rest;
+      return rest.map((s, i) => (i === 0 ? { ...s, items: [...s.items, ...removed.items] } : s));
+    });
+  };
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    setSections(prev => {
+      const from = prev.findIndex(s => s.items.some(i => i.id === activeId));
+      const to = overId.startsWith('sec:')
+        ? prev.findIndex(s => `sec:${s.id}` === overId)
+        : prev.findIndex(s => s.items.some(i => i.id === overId));
+      if (from < 0 || to < 0) return prev;
+      const item = prev[from].items.find(i => i.id === activeId)!;
+      const fromItems = prev[from].items.filter(i => i.id !== activeId);
+      const base = from === to ? fromItems : prev[to].items;
+      let index = base.findIndex(i => i.id === overId);
+      if (index < 0) index = base.length;
+      else if (from !== to) {
+        // dropping onto a row from another section: land after it if it was below the pointer
+        const overTop = over.rect.top + over.rect.height / 2;
+        const activeTop = (active.rect.current.translated?.top ?? 0) + (active.rect.current.translated?.height ?? 0) / 2;
+        if (activeTop > overTop) index += 1;
+      }
+      const nextItems = [...base.slice(0, index), item, ...base.slice(index)];
+      return prev.map((sec, i) => {
+        if (from === to && i === from) {
+          // same section: classic reorder
+          const oldIdx = sec.items.findIndex(x => x.id === activeId);
+          const newIdx = sec.items.findIndex(x => x.id === overId);
+          const arr = [...sec.items];
+          arr.splice(oldIdx, 1);
+          arr.splice(newIdx, 0, item);
+          return { ...sec, items: arr };
+        }
+        if (i === from) return { ...sec, items: fromItems };
+        if (i === to) return { ...sec, items: nextItems };
+        return sec;
+      });
+    });
   };
 
   const handleAddIngredient = (sectionId: string) => {
@@ -166,7 +256,7 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
     setReparseError('');
     setReparseNote('');
     try {
-      const parsed = await reparseFromSource(source);
+      const parsed = await reparseFromSource(source, initialRecipe?.id);
       const ok = window.confirm(
         'Replace the title, description, times, ingredients and steps with the AI-parsed version?\n\nNothing is saved until you press Save, and closing this form discards it.'
       );
@@ -411,6 +501,7 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
               </button>
             </div>
 
+            <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             {sections.map((sec, secIdx) => (
               <div key={sec.id} className="section-editor-card">
                 <div className="section-title-row">
@@ -433,9 +524,10 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
                   )}
                 </div>
 
-                <div className="items-list-editor">
+                <SectionDropZone id={sec.id}>
+                  <SortableContext items={sec.items.map(i => i.id)} strategy={verticalListSortingStrategy}>
                   {sec.items.map((item) => (
-                    <div key={item.id} className="item-row">
+                    <SortableItem key={item.id} id={item.id}>
                       <input
                         type="number"
                         step="any"
@@ -472,8 +564,9 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
                       >
                         <X size={14} />
                       </button>
-                    </div>
+                    </SortableItem>
                   ))}
+                  </SortableContext>
 
                   <button
                     type="button"
@@ -483,9 +576,21 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
                     <Plus size={14} />
                     <span>Add Ingredient to {sec.title || 'Section'}</span>
                   </button>
-                </div>
+                </SectionDropZone>
               </div>
             ))}
+            </DndContext>
+            {sectionToRemove && (
+              <div className="confirm-backdrop" onClick={() => setSectionToRemove(null)}>
+                <div className="confirm-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+                  <h4>Remove "{sections.find(s => s.id === sectionToRemove)?.title || 'this section'}"?</h4>
+                  <p>What should happen to the ingredients in it?</p>
+                  <button type="button" className="btn btn-secondary" onClick={() => confirmRemoveSection(true)}>Delete section, keep ingredients</button>
+                  <button type="button" className="btn btn-outline danger" onClick={() => confirmRemoveSection(false)}>Delete everything</button>
+                  <button type="button" className="btn btn-outline" onClick={() => setSectionToRemove(null)}>Cancel</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Instruction Steps */}
@@ -571,6 +676,7 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
           justify-content: space-between;
         }
         .grid-2 {
+          align-items: end;
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 1rem;
@@ -637,6 +743,12 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
           gap: 0.5rem;
           align-items: center;
         }
+        .item-handle { background: none; border: none; color: var(--text-muted); cursor: grab; padding: 0.25rem; touch-action: none; display: flex; align-items: center; }
+        .item-handle:active { cursor: grabbing; }
+        .confirm-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+        .confirm-dialog { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.25rem; max-width: 380px; width: 100%; display: flex; flex-direction: column; gap: 0.6rem; }
+        .confirm-dialog h4 { margin: 0; }
+        .confirm-dialog p { margin: 0 0 0.4rem; color: var(--text-muted); }
         .item-qty { width: 75px; }
         .item-unit { width: 110px; }
         .item-name { flex: 2; }
@@ -645,22 +757,23 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
           /* One ingredient per card: qty + unit + remove on top, name and notes full width below */
           .item-row {
             display: grid;
-            grid-template-columns: 90px 1fr 40px;
+            grid-template-columns: 28px 90px 1fr 40px;
             grid-template-areas:
-              'qty unit remove'
-              'name name name'
-              'notes notes notes';
+              'handle qty unit remove'
+              'name name name name'
+              'notes notes notes notes';
             gap: 0.5rem;
             padding: 0.75rem;
             background: var(--bg-input);
             border: 1px solid var(--border-color);
             border-radius: var(--radius-md);
           }
+          .item-row .item-handle { grid-area: handle; }
           .item-row .item-qty { grid-area: qty; width: auto; min-width: 0; }
           .item-row .item-unit { grid-area: unit; width: auto; min-width: 0; }
           .item-row .item-name { grid-area: name; }
           .item-row .item-notes { grid-area: notes; }
-          .item-row .btn { grid-area: remove; padding: 0.5rem; justify-self: end; }
+          .item-row > .btn { grid-area: remove; padding: 0.5rem; justify-self: end; }
           .add-item-btn { align-self: stretch; justify-content: center; text-align: center; }
         }
         .add-item-btn {

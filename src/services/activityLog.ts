@@ -13,6 +13,7 @@ export interface LogEntry {
   label: string; // recipe title, URL or file name
   method?: string; // what was used, e.g. "Jina reader (recipe data)" or "Gemini"
   detail?: string; // result or error
+  recipeId?: string; // the recipe it is about, so the log can link to it
   started: string; // ISO
   ended?: string; // ISO
   status: LogStatus;
@@ -86,10 +87,10 @@ export function subscribeLog(cb: () => void): () => void {
   return () => listeners.delete(cb);
 }
 
-export function startLog(kind: LogKind, label: string, method?: string): string {
+export function startLog(kind: LogKind, label: string, method?: string, recipeId?: string): string {
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   entries = [
-    { id, kind, label, method, started: new Date().toISOString(), status: 'running', updated: Date.now(), device: deviceId() },
+    { id, kind, label, method, recipeId, started: new Date().toISOString(), status: 'running', updated: Date.now(), device: deviceId() },
     ...entries,
   ];
   persist();
@@ -105,7 +106,7 @@ export function updateLog(id: string, patch: Partial<Pick<LogEntry, 'method' | '
   }
 }
 
-export function finishLog(id: string, status: 'done' | 'failed', patch: Partial<Pick<LogEntry, 'method' | 'detail' | 'label'>> = {}): void {
+export function finishLog(id: string, status: 'done' | 'failed', patch: Partial<Pick<LogEntry, 'method' | 'detail' | 'label' | 'recipeId'>> = {}): void {
   entries = entries.map((e) =>
     e.id === id ? { ...e, ...patch, status, ended: new Date().toISOString(), updated: Date.now() } : e
   );
@@ -132,6 +133,7 @@ export function recordLog(entry: {
   label: string;
   method?: string;
   detail?: string;
+  recipeId?: string;
   started: number;
   ended: number;
   status: 'done' | 'failed';
@@ -144,6 +146,7 @@ export function recordLog(entry: {
       label: entry.label,
       method: entry.method,
       detail: entry.detail,
+      recipeId: entry.recipeId,
       started: new Date(entry.started).toISOString(),
       ended: new Date(entry.ended).toISOString(),
       status: entry.status,

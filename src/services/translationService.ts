@@ -169,6 +169,7 @@ function applyServerPatches(patches: ServerPatch[]): void {
     const recipe = recipes[idx];
     const logBase = {
       id: `srv-${patch.key}-${patch.endedAt}`,
+      recipeId: patch.id,
       kind: patch.kind === 't' ? ('translate' as const) : ('annotate' as const),
       label: patch.label || recipe?.title || patch.id,
       started: patch.startedAt,
@@ -244,7 +245,7 @@ async function runLocalQueue(): Promise<void> {
     const method = tier === 'light' ? 'Gemini (light model)' : 'Gemini';
     let logId = logIds.get(key);
     if (!logId) {
-      logId = startLog('annotate', r.title, method);
+      logId = startLog('annotate', r.title, method, r.id);
       logIds.set(key, logId);
     } else {
       updateLog(logId, { method });
@@ -328,7 +329,7 @@ async function runLocalQueue(): Promise<void> {
 
     let logId = logIds.get(next.id);
     if (!logId) {
-      logId = startLog('translate', next.title, 'Gemini');
+      logId = startLog('translate', next.title, 'Gemini', next.id);
       logIds.set(next.id, logId);
     }
 

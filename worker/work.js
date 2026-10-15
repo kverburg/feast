@@ -262,7 +262,7 @@ async function submitNewBatch(env, doc, entries, log) {
       requests.push({ key: subKeys[0], body: buildAnnotationRequest(recipe.ingredientSections, recipe.instructions, 'nl') });
       if (subKeys[1]) requests.push({ key: subKeys[1], body: buildAnnotationRequest(recipe.ingredientSectionsEn, recipe.instructionsEn, 'en') });
     }
-    items.push({ key: entry.key, subKeys });
+    items.push({ key: entry.key, subKeys, label: recipe.title });
   }
   if (requests.length === 0) {
     await writeWork(env, doc);

@@ -28,6 +28,7 @@ export interface ServerWork {
   status: ServerStatus | null;
   patches: ServerPatch[];
   pending: number; // how many recipes the worker knows are waiting
+  batches?: { name: string; model: string; submittedAt: number; items: { key: string; label?: string }[] }[]; // in flight at Gemini
   batch?: { active: number; off: string | null }; // Gemini batch jobs in flight; off: why direct calls are used instead
 }
 
