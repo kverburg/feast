@@ -6,7 +6,8 @@ The AI work (translate, annotate, import parsing) runs on Gemini by default. Mis
 |---|---|---|
 | `AI_PROVIDER` | Provider for the default tier (translate, import parsing): `gemini` or `mistral` | `gemini` |
 | `AI_PROVIDER_LIGHT` | Provider for the light tier (annotation). Falls back to `AI_PROVIDER` | same as `AI_PROVIDER` |
-| `MISTRAL_API_KEY` | Secret. Set it as a GitHub secret of the same name; the deploy uploads it | none |
+| `MISTRAL_API_KEY` | Secret. Set it as a GitHub secret of the same name; the production deploy uploads it | none |
+| `MISTRAL_API_KEY_TEST` | GitHub secret only: used by PR previews (as `MISTRAL_API_KEY` there) and the benchmark | none |
 | `MISTRAL_MODEL`, `MISTRAL_MODEL_LIGHT` | Model names | `mistral-small-latest` |
 
 Set the first two as `[vars]` in `wrangler.toml` (or in `.env.local` / `.dev.vars` locally). Without them nothing changes.
