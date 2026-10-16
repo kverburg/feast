@@ -1,0 +1,52 @@
+{
+  "id": "20261016184048-annotate-mistral-baseline",
+  "startedAt": "2026-10-16T18:40:48.595Z",
+  "task": "annotate",
+  "provider": "mistral",
+  "model": "mistral-small-latest",
+  "label": "baseline",
+  "contextHash": "none",
+  "commit": "8c842db",
+  "recipes": 2,
+  "meanScore": 0,
+  "structureRate": 0,
+  "checks": {
+    "valid_structure": 0,
+    "forms_complete": 0,
+    "has_refs": 0,
+    "mentions_verbatim": 0,
+    "ids_valid": 0
+  },
+  "latencyMs": {
+    "p50": 102,
+    "p95": 102
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0
+  },
+  "errors": [
+    {
+      "recipe": "seed-1 (nl)",
+      "message": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    },
+    {
+      "recipe": "seed-1 (en)",
+      "message": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    }
+  ],
+  "items": [
+    {
+      "name": "seed-1 (nl)",
+      "score": 0,
+      "ms": 102,
+      "error": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    },
+    {
+      "name": "seed-1 (en)",
+      "score": 0,
+      "ms": 27,
+      "error": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    }
+  ]
+}

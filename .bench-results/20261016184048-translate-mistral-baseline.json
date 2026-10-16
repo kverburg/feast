@@ -1,0 +1,62 @@
+{
+  "id": "20261016184048-translate-mistral-baseline",
+  "startedAt": "2026-10-16T18:40:48.190Z",
+  "task": "translate",
+  "provider": "mistral",
+  "model": "mistral-small-latest",
+  "label": "baseline",
+  "contextHash": "none",
+  "commit": "8c842db",
+  "recipes": 3,
+  "meanScore": 0,
+  "structureRate": 0,
+  "checks": {
+    "valid_structure": 0,
+    "amounts_kept": 0,
+    "language_detected": 0,
+    "steps_translated": 0,
+    "names_filled": 0
+  },
+  "latencyMs": {
+    "p50": 27,
+    "p95": 109
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0
+  },
+  "errors": [
+    {
+      "recipe": "seed-1 (nl)",
+      "message": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    },
+    {
+      "recipe": "seed-1 (en)",
+      "message": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    },
+    {
+      "recipe": "seed-2 (nl)",
+      "message": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    }
+  ],
+  "items": [
+    {
+      "name": "seed-1 (nl)",
+      "score": 0,
+      "ms": 109,
+      "error": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    },
+    {
+      "name": "seed-1 (en)",
+      "score": 0,
+      "ms": 24,
+      "error": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    },
+    {
+      "name": "seed-2 (nl)",
+      "score": 0,
+      "ms": 27,
+      "error": "Gemini API returned status 400: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/googl"
+    }
+  ]
+}

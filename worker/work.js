@@ -22,6 +22,7 @@ import {
 import { classifyGeminiError, GeminiHttpError } from '../src/shared/geminiErrors.ts';
 import { contentHash, annotationSource, isUntouchedPending, needsAnnotation } from '../src/shared/recipeWork.ts';
 import { generateContent, batchModelCandidates, submitBatch, getBatch } from './gemini.js';
+import { aiReady, providerFor } from './providers.js';
 
 const GAP_BETWEEN_CALLS_MS = 6000; // stay under free-tier requests per minute (WORK_GAP_MS overrides it in tests)
 const FIRST_BACKOFF_MS = 60_000;
@@ -100,7 +101,7 @@ const batchOffNote = (status) => `The Gemini batch API is not available for this
  * off (GEMINI_BATCH=off) it falls back to direct calls, one recipe at a time.
  */
 export async function processWork(env, opts = {}) {
-  if (!env.GEMINI_API_KEY) return 'no_key';
+  if (!aiReady(env)) return 'no_key';
   const log = opts.log || (() => {});
 
   const allEntries = await pendingEntries(env);
@@ -119,7 +120,8 @@ export async function processWork(env, opts = {}) {
     if (doc.status.nextAt > Date.now()) return liveResult; // rate limited or stopped: the rest waits
   }
 
-  const batchOn = env.GEMINI_BATCH !== 'off' && !(doc.batchOff && doc.batchOff.until > Date.now());
+  // Batch is Gemini's: it is only used while both tiers run on Gemini
+  const batchOn = env.GEMINI_BATCH !== 'off' && providerFor(env, 'default') === 'gemini' && providerFor(env, 'light') === 'gemini' && !(doc.batchOff && doc.batchOff.until > Date.now());
   if (entries.length === 0 && doc.batches.length === 0) return liveResult;
   if (!batchOn && doc.batches.length === 0) {
     const direct = await processDirect(env, doc, entries, opts);
