@@ -167,6 +167,19 @@ async function handleClientLog(req, env) {
   return json({ ok: true, stored: events.length });
 }
 
+// Benchmark results written by bench/run.mjs straight into KV (bench:index = summaries, bench:run:<id> = one run)
+async function handleBench(url, req, env) {
+  if (req.method !== 'GET') return new Response('Method not allowed', { status: 405 });
+  if (url.pathname === '/api/bench/run') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) return json({ error: 'bad id' }, 400);
+    const raw = await env.FEAST.get(`bench:run:${id}`);
+    return raw ? new Response(raw, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }) : json({ error: 'not found' }, 404);
+  }
+  const raw = await env.FEAST.get('bench:index');
+  return new Response(raw || '[]', { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+}
+
 async function route(req, env, ctx) {
   const url = new URL(req.url);
   const isState = url.pathname === '/api/state';
@@ -175,13 +188,15 @@ async function route(req, env, ctx) {
   const isActivity = url.pathname === '/api/activity';
   const isClientLog = url.pathname === '/api/log';
   const isWork = url.pathname === '/api/work' || url.pathname === '/api/work/ack' || url.pathname === '/api/work/retry';
-  if (!isState && !isGemini && !isImage && !isActivity && !isClientLog && !isWork) return env.ASSETS.fetch(req);
+  const isBench = url.pathname === '/api/bench' || url.pathname === '/api/bench/run';
+  if (!isState && !isBench && !isGemini && !isImage && !isActivity && !isClientLog && !isWork) return env.ASSETS.fetch(req);
 
   // Cloudflare Access adds this header after login. Without it, refuse.
   // (DEV_SKIP_ACCESS is only ever set in .dev.vars for running the worker locally.)
   if (!req.headers.get('Cf-Access-Jwt-Assertion') && env.DEV_SKIP_ACCESS !== '1') return new Response('Forbidden', { status: 403 });
 
   if (isWork) return handleWork(url, req, env, ctx);
+  if (isBench) return handleBench(url, req, env);
   if (isGemini) return handleGemini(url, req, env);
   if (isImage) return handleImage(url, req, env);
   if (isActivity) return handleActivity(req, env);

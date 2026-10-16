@@ -5,7 +5,7 @@ import { startTranslationQueue } from '../services/translationService';
 import { usePeople, addPerson, renamePerson, deletePerson } from '../services/peopleService';
 import { startLog, finishLog } from '../services/activityLog';
 import { showToast } from '../services/toast';
-import { Activity, Plus, Trash2, Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
+import { Activity, Gauge, Plus, Trash2, Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
 import { Recipe } from '../types/recipe';
 import { parseCookmateXml } from '../services/cookmateImportService';
 
@@ -17,12 +17,14 @@ interface SettingsModalProps {
   toggleTheme: () => void;
   voiceEnabled: boolean;
   onToggleVoice: (enabled: boolean) => void;
+  onOpenBenchmark: () => void;
   onOpenActivityLog: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   recipes,
   onOpenActivityLog,
+  onOpenBenchmark,
   onImportBackup,
   onResetSeed,
   theme,
@@ -343,6 +345,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <button className="btn btn-secondary btn-sm" onClick={onOpenActivityLog}>
               <Activity size={16} />
               <span>Open activity log</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="settings-card card">
+          <div className="setting-row">
+            <div>
+              <span className="setting-name">AI benchmark</span>
+              <p className="setting-desc">How well the AI providers and prompts do on the test recipes, over time.</p>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={onOpenBenchmark}>
+              <Gauge size={16} />
+              <span>Open benchmark</span>
             </button>
           </div>
         </div>

@@ -1,0 +1,47 @@
+name: AI benchmark
+
+# Weekly run of the current setup and the challengers; results go to Cloudflare KV
+# (Settings > AI benchmark in the app). Can also be started by hand with options.
+on:
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      context:
+        description: 'Optional context file (e.g. bench/contexts/v1.md) to run as an extra setup'
+        required: false
+        default: ''
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run the benchmark
+        env:
+          # test keys keep this away from production quota
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY_TEST }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY_TEST }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CONTEXT: ${{ inputs.context }}
+        run: |
+          set +e
+          failures=0
+          run() { npm run bench -- "$@" || failures=$((failures + 1)); }
+          for task in translate annotate; do
+            [ -n "$GEMINI_API_KEY" ] && run --task $task --provider gemini
+            [ -n "$MISTRAL_API_KEY" ] && run --task $task --provider mistral
+            if [ -n "$CONTEXT" ]; then
+              [ -n "$GEMINI_API_KEY" ] && run --task $task --provider gemini --context "$CONTEXT"
+              [ -n "$MISTRAL_API_KEY" ] && run --task $task --provider mistral --context "$CONTEXT"
+            fi
+          done
+          echo "failed runs: $failures"
+          exit 0
