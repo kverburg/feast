@@ -9,6 +9,7 @@ import { execSync } from 'node:child_process';
 import { generateContent } from '../worker/gemini.js';
 import { buildTranslationRequest, parseTranslation, buildAnnotationRequest, parseAnnotation, readJson } from '../src/shared/geminiTasks.ts';
 import { INITIAL_RECIPES } from '../src/services/storageService.ts';
+import { kvClient } from './kv.mjs';
 import { checkTranslation, checkAnnotation, scoreOf, summarize } from './checks.mjs';
 
 const args = Object.fromEntries(
@@ -49,26 +50,30 @@ const contextHash = contextText ? crypto.createHash('sha256').update(contextText
 const label = args.label || (args.context ? path.basename(args.context, path.extname(args.context)) : 'baseline');
 const withContext = (body) => (contextText ? { ...body, systemInstruction: { parts: [{ text: contextText }] } } : body);
 
-// Golden set: the seed recipes in both directions, plus recipes exported from the app (bench/golden/*.json)
-const strip = (r, lang) => ({ ...r, titleEn: undefined, descriptionEn: undefined, ingredientSectionsEn: undefined, instructionsEn: undefined, translationPending: false, __lang: lang });
-const golden = [];
-for (const r of INITIAL_RECIPES) {
-  golden.push({ name: `${r.id} (nl)`, lang: 'nl', recipe: strip(r, 'nl') });
+// Golden set: the seed recipes plus your own recipes (bench/golden/*.json, or Cloudflare KV key bench:golden),
+// each in both directions when it has two languages. See bench/golden.mjs: your recipes are never committed.
+const strip = (r) => ({ ...r, titleEn: undefined, descriptionEn: undefined, ingredientSectionsEn: undefined, instructionsEn: undefined, translationPending: false });
+const expand = (r, prefix) => {
   if (r.ingredientSectionsEn && r.instructionsEn) {
-    golden.push({ name: `${r.id} (en)`, lang: 'en', recipe: { ...strip(r, 'en'), title: r.titleEn || r.title, description: r.descriptionEn || r.description, ingredientSections: r.ingredientSectionsEn, instructions: r.instructionsEn }, full: r });
+    return [
+      { name: `${prefix}${r.title} (nl)`, lang: 'nl', recipe: strip(r) },
+      { name: `${prefix}${r.title} (en)`, lang: 'en', recipe: { ...strip(r), title: r.titleEn || r.title, description: r.descriptionEn || r.description, ingredientSections: r.ingredientSectionsEn, instructions: r.instructionsEn }, full: r },
+    ];
   }
-}
+  return [{ name: `${prefix}${r.title}`, lang: 'en', recipe: r }]; // only one language: assume English (to be translated to Dutch)
+};
+const golden = INITIAL_RECIPES.flatMap((r) => expand(r, `${r.id} `));
+let own = [];
 const goldenDir = 'bench/golden';
 if (fs.existsSync(goldenDir)) {
   for (const f of fs.readdirSync(goldenDir).filter((f) => f.endsWith('.json'))) {
     const data = JSON.parse(fs.readFileSync(path.join(goldenDir, f), 'utf8'));
-    for (const r of Array.isArray(data) ? data : data.recipes || []) {
-      if (r.id?.startsWith('seed-')) continue;
-      const lang = r.titleEn ? 'nl' : 'en'; // an app recipe with a second language is the Dutch original
-      golden.push({ name: `${f}:${r.id}`, lang, recipe: r });
-    }
+    own.push(...(Array.isArray(data) ? data : data.recipes || []));
   }
 }
+if (own.length === 0 && kvClient()) own = (await kvClient().get('bench:golden')) || [];
+golden.push(...own.filter((r) => !String(r.id).startsWith('seed-')).flatMap((r) => expand(r, 'app: ')));
+console.log(`golden set: ${golden.length} cases (${INITIAL_RECIPES.length} seed recipes, ${own.length} of your own)`);
 const cases = golden.slice(0, limit);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -121,21 +126,12 @@ fs.writeFileSync(`.bench-results/${run.id}.json`, JSON.stringify(run, null, 2));
 console.log(`saved .bench-results/${run.id}.json`);
 
 // Upload to Cloudflare KV (the app's Settings > Benchmark page reads it there)
-const { CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: account } = process.env;
-if (token && account && args.upload !== 'false') {
-  const toml = fs.readFileSync('wrangler.toml', 'utf8');
-  const ns = (toml.match(/binding\s*=\s*"FEAST"\s*\nid\s*=\s*"([0-9a-f]+)"/) || [])[1];
-  const base = `https://api.cloudflare.com/client/v4/accounts/${account}/storage/kv/namespaces/${ns}`;
-  const headers = { Authorization: `Bearer ${token}` };
-  const put = async (key, value) => {
-    const res = await fetch(`${base}/values/${encodeURIComponent(key)}`, { method: 'PUT', headers, body: JSON.stringify(value) });
-    if (!res.ok) throw new Error(`KV write ${key}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
-  };
-  const indexRes = await fetch(`${base}/values/bench%3Aindex`, { headers });
-  const index = indexRes.ok ? await indexRes.json().catch(() => []) : [];
+const kv = kvClient();
+if (kv && args.upload !== 'false') {
   const { items, ...summary } = run;
-  await put(`bench:run:${run.id}`, run);
-  await put('bench:index', [summary, ...index.filter((r) => r.id !== run.id)].slice(0, 200));
+  const index = (await kv.get('bench:index')) || [];
+  await kv.put(`bench:run:${run.id}`, run);
+  await kv.put('bench:index', [summary, ...index.filter((r) => r.id !== run.id)].slice(0, 200));
   console.log('uploaded to Cloudflare KV');
 } else {
   console.log('not uploaded (set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to store it in Cloudflare)');
