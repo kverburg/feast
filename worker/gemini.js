@@ -4,6 +4,7 @@
 // It is never sent to the browser.
 
 import { GeminiHttpError } from '../src/shared/geminiErrors.ts';
+import { providerFor, keyFor, mistralGenerate, probeMistral } from './providers.js';
 
 export const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export const DEFAULT_MODEL = 'gemini-flash-latest';
@@ -44,9 +45,24 @@ export function modelsFor(tier, env) {
  * @returns {Promise<{ status: number, body: string }>}
  */
 export async function geminiProxy({ route, method, tier, bodyText = '', env, log = () => {} }) {
-  if (route === 'status' && method === 'GET') return reply({ configured: !!env.GEMINI_API_KEY });
+  if (route === 'status' && method === 'GET') return reply({ configured: !!keyFor(env, providerFor(env, 'default')) });
 
-  if (!env.GEMINI_API_KEY) return reply({ error: 'not_configured' }, 503);
+  const provider = providerFor(env, route === 'verify' ? 'default' : tier);
+  if (!keyFor(env, provider)) return reply({ error: 'not_configured' }, 503);
+
+  if (provider === 'mistral') {
+    if (route === 'verify' && method === 'GET') return reply(await probeMistral(env));
+    if (route === 'generate' && method === 'POST') {
+      if (bodyText.length > MAX_BODY_BYTES) return reply({ error: 'too_large' }, 413);
+      try {
+        return reply(await mistralGenerate(env, JSON.parse(bodyText), tier, log));
+      } catch (e) {
+        if (e instanceof GeminiHttpError) return reply(e.detail || '', e.status);
+        return reply({ error: 'bad_request' }, 400);
+      }
+    }
+    return reply('Not found', 404);
+  }
 
   if (route === 'verify' && method === 'GET') {
     const res = await fetch(`${env.GEMINI_BASE || GEMINI_BASE}/models?pageSize=1`, { headers: { 'x-goog-api-key': env.GEMINI_API_KEY } });
@@ -100,6 +116,7 @@ export async function geminiProxy({ route, method, tier, bodyText = '', env, log
  * Same model choice and 404 fallback as the proxy.
  */
 export async function generateContent(env, body, tier, log = () => {}) {
+  if (providerFor(env, tier) === 'mistral') return mistralGenerate(env, body, tier, log);
   const bodyText = JSON.stringify(body);
   const models = modelsFor(tier, env);
   for (let i = 0; i < models.length; i++) {

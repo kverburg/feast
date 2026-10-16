@@ -1,5 +1,6 @@
 import { geminiProxy } from './gemini.js';
 import { processWork, readWork, acknowledge, clipWorkList, pendingEntries } from './work.js';
+import { aiReady } from './providers.js';
 
 // Feast: serves the app (static assets) and stores one shared state in KV.
 const json = (o, status = 200) =>
@@ -71,7 +72,7 @@ async function handleWork(url, req, env, ctx) {
   }
 
   if (url.pathname === '/api/work' && req.method === 'GET') {
-    const enabled = !!env.GEMINI_API_KEY; // the server needs its own Gemini key to work in the background
+    const enabled = aiReady(env); // the server needs its own key for the provider(s) in use to work in the background
     const [doc, pending] = enabled ? await Promise.all([readWork(env), pendingEntries(env)]) : [null, []];
     // Previews have no cron: while the app is open, polling moves the work along instead
     if (enabled && env.PUMP_ON_POLL === 'true' && pending.length > 0 && ctx) ctx.waitUntil(processWork(env, { log }));
