@@ -23,7 +23,7 @@ import { CookModeModal } from './components/CookModeModal';
 import { ShoppingList } from './components/ShoppingList';
 import { SettingsModal } from './components/SettingsModal';
 import { Meals } from './components/Meals';
-import { startTranslationQueue, subscribeTranslationChange, subscribeTranslationError } from './services/translationService';
+import { retryTranslation, startTranslationQueue, subscribeTranslationChange, subscribeTranslationError } from './services/translationService';
 import { ErrorBanner } from './components/ErrorBanner';
 import { Toasts } from './components/Toasts';
 import { ActivityLog } from './components/ActivityLog';
@@ -37,6 +37,7 @@ export function App() {
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
   const [translationError, setTranslationError] = useState<string | null>(null);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [importCounts, setImportCounts] = useState({ busy: 0, failed: 0 });
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [currentTab, setCurrentTab] = useState<'recipes' | 'meals' | 'shopping' | 'settings'>('recipes');
@@ -188,7 +189,10 @@ export function App() {
 
     // Background queue: translates recipes that are waiting for a Dutch version (needs a Gemini key)
     const unsubscribeChange = subscribeTranslationChange(() => setRecipes(getStoredRecipes()));
-    const unsubscribeError = subscribeTranslationError(setTranslationError);
+    const unsubscribeError = subscribeTranslationError((m) => {
+      setTranslationError(m);
+      if (!m) setDismissedError(null);
+    });
     startTranslationQueue();
 
     // Background imports: notify when done or failed, resume anything still queued from last time
@@ -352,9 +356,12 @@ export function App() {
         }}
       />
 
-      {translationError && (
+      {translationError && dismissedError !== translationError && (
         <ErrorBanner
           message={translationError}
+          secondaryLabel="Retry"
+          onSecondary={() => void retryTranslation()}
+          onDismiss={() => setDismissedError(translationError)}
           actionLabel="Open Settings"
           onAction={() => {
             setCurrentTab('settings');

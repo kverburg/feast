@@ -46,7 +46,7 @@ export async function geminiGenerate(body: unknown, tier: GeminiTier = 'default'
     // 403/non-JSON: no worker behind this page (local dev) or not logged in through Access.
     if (!isJson || res.status === 403 || notConfigured) throw new GeminiUnavailableError('No Gemini key available.');
   }
-  if (!res.ok) throw new GeminiHttpError(res.status);
+  if (!res.ok) throw new GeminiHttpError(res.status, (await res.text().catch(() => '')).slice(0, 500));
   return res.json();
 }
 

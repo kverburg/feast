@@ -2,7 +2,7 @@ import { Recipe } from '../types/recipe';
 import { translateRecipeWithGemini, isGeminiAvailable, classifyGeminiError, GeminiHttpError } from './geminiService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
 import { startLog, updateLog, finishLog, recordLog } from './activityLog';
-import { fetchServerWork, acknowledgePatches, ServerPatch, ServerWork } from './serverWork';
+import { fetchServerWork, acknowledgePatches, retryServerWork, ServerPatch, ServerWork } from './serverWork';
 import { annotateRecipeVersion, VersionAnnotation } from './annotationService';
 import {
   annotationSource,
@@ -26,8 +26,8 @@ import {
 
 const MISSING_KEY_MESSAGE =
   'Gemini API key missing: recipes cannot be translated. Add a key in Settings.';
-const rejectedKeyMessage = (status?: number) =>
-  `Gemini rejected the request${status ? ` (status ${status})` : ''}: check the API key in Settings. Recipes stay untranslated until it works.`;
+const rejectedKeyMessage = (e?: unknown) =>
+  `Gemini rejected the request${e instanceof GeminiHttpError ? ` (${e.message.replace('Gemini API returned ', '')})` : ''}. Check the API key in Settings. Recipes stay untranslated until it works.`;
 
 export { withPendingTranslation };
 
@@ -108,6 +108,14 @@ export function subscribeTranslationError(cb: (message: string | null) => void):
  * Start (or nudge) the background queue. Safe to call any time: if it is already running it
  * picks up newly queued recipes by itself.
  */
+/** The "Retry" button: forget what failed (here and on the server) and start again. */
+export async function retryTranslation(): Promise<void> {
+  badOutputAttempts.clear();
+  setQueueError(null);
+  await retryServerWork();
+  startTranslationQueue();
+}
+
 export function startTranslationQueue(): void {
   if (queueRunning) return;
   queueRunning = true;
@@ -300,7 +308,7 @@ async function runLocalQueue(): Promise<void> {
       }
       finishLog(logId, 'failed', { detail: kind === 'unavailable' ? 'No Gemini API key' : reason });
       logIds.delete(key);
-      setQueueError(kind === 'unavailable' ? MISSING_KEY_MESSAGE : rejectedKeyMessage(e instanceof GeminiHttpError ? e.status : undefined));
+      setQueueError(kind === 'unavailable' ? MISSING_KEY_MESSAGE : rejectedKeyMessage(e));
       return false;
     }
   };
@@ -377,7 +385,7 @@ async function runLocalQueue(): Promise<void> {
       } else {
         finishLog(logId, 'failed', { detail: reason });
         logIds.delete(next.id);
-        setQueueError(rejectedKeyMessage(e instanceof GeminiHttpError ? e.status : undefined));
+        setQueueError(rejectedKeyMessage(e));
         return; // retried when the app is opened again or a key is saved
       }
     }
