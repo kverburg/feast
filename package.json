@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "dev:worker": "vite build && wrangler dev --test-scheduled",
     "test": "esbuild tests/*.test.mjs --bundle --platform=node --format=esm --outdir=.test-out --log-level=error && node --test .test-out/*.test.js",
-    "bench": "esbuild bench/run.mjs --bundle --platform=node --format=esm --outfile=.bench-out/run.mjs --log-level=error && node .bench-out/run.mjs"
+    "bench": "esbuild bench/run.mjs --bundle --platform=node --format=esm --outfile=.bench-out/run.mjs --log-level=error && node .bench-out/run.mjs",
+    "bench:golden": "node bench/golden.mjs",
+    "bench:models": "node bench/models.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

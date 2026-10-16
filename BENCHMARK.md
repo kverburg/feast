@@ -24,3 +24,6 @@ A recipe's score is the share of checks passed; a run's score is the mean. Laten
 
 ## Contexts and golden recipes
 See `bench/contexts/README.md` and `bench/golden/README.md`.
+
+## Which models
+`npm run bench:models` lists what your keys can use. Pass one with `--model <id>`.

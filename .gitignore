@@ -10,3 +10,4 @@ dist
 .test-out/
 .bench-out/
 .bench-results/
+bench/golden/*.json
