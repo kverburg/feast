@@ -14,6 +14,25 @@ export const MAX_BODY_BYTES = 12 * 1024 * 1024; // photos are sent as base64
 
 const reply = (body, status = 200) => ({ status, body: typeof body === 'string' ? body : JSON.stringify(body) });
 
+/** A tiny real generateContent call, to see what an actual request gets back. Shared with the app (typed keys). */
+export async function probeModel(base, apiKey, model) {
+  try {
+    const res = await fetch(`${base}/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'Reply with {"ok":true}' }] }],
+        generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 32 },
+      }),
+    });
+    if (res.ok) return { model, ok: true, message: 'ok' };
+    const body = await res.json().catch(() => null);
+    return { model, ok: false, message: `HTTP ${res.status}${body?.error?.message ? `, ${String(body.error.message).slice(0, 160)}` : ''}` };
+  } catch {
+    return { model, ok: false, message: 'could not reach Google' };
+  }
+}
+
 export function modelsFor(tier, env) {
   const main = env.GEMINI_MODEL || DEFAULT_MODEL;
   return tier === 'light' ? [env.GEMINI_MODEL_LIGHT || LIGHT_MODEL, main] : [main];
@@ -31,9 +50,19 @@ export async function geminiProxy({ route, method, tier, bodyText = '', env, log
 
   if (route === 'verify' && method === 'GET') {
     const res = await fetch(`${env.GEMINI_BASE || GEMINI_BASE}/models?pageSize=1`, { headers: { 'x-goog-api-key': env.GEMINI_API_KEY } });
-    if (res.ok) return reply({ ok: true, message: 'Key works.' });
-    const body = await res.json().catch(() => null);
-    return reply({ ok: false, message: body?.error?.message || `Google rejected the key (HTTP ${res.status}).` });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      return reply({ ok: false, message: body?.error?.message || `Google rejected the key (HTTP ${res.status}).` });
+    }
+    // Listing models proves the key, not that real requests work: try a tiny one on each model in use
+    const models = [...new Set([...modelsFor('main', env), ...modelsFor('light', env)])];
+    const results = [];
+    for (const model of models) results.push(await probeModel(env.GEMINI_BASE || GEMINI_BASE, env.GEMINI_API_KEY, model));
+    const failed = results.filter((r) => !r.ok);
+    return reply({
+      ok: failed.length === 0,
+      message: failed.length === 0 ? `Key works (${results.map((r) => r.model).join(', ')} answered).` : `Key is valid, but a real request failed. ${failed.map((r) => `${r.model}: ${r.message}`).join(' | ')}`,
+    });
   }
 
   if (route === 'generate' && method === 'POST') {
