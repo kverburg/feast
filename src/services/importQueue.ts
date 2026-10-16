@@ -1,12 +1,12 @@
 import { Recipe } from '../types/recipe';
 import {
   parseUrlToRecipe,
-  parsePhotoToRecipe,
   parseHtmlContentToRecipe,
   parseRawTextToRecipe,
   isUsableRecipe,
 } from './recipeParserService';
 import { parseRecipeWithGemini, isGeminiAvailable } from './geminiService';
+import { classifyGeminiError } from '../shared/geminiErrors';
 import { findImageForRecipe } from './imageSearchService';
 import { withPendingTranslation } from './translationService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
@@ -140,6 +140,21 @@ export function startImportQueue(): void {
   })();
 }
 
+// The AI is sometimes busy (503) or rate limited (429): wait and try again before giving up
+async function withRetries<T>(call: () => Promise<T>, setMethod: (m: string) => void, method: string): Promise<T> {
+  const waits = [15000, 45000, 90000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call();
+    } catch (e) {
+      if (classifyGeminiError(e) !== 'transient' || attempt >= waits.length) throw e;
+      setMethod(`${method} (busy, trying again in ${waits[attempt] / 1000}s)`);
+      await new Promise((r) => setTimeout(r, waits[attempt]));
+      setMethod(method);
+    }
+  }
+}
+
 async function parseJob(job: ImportJob, setMethod: (m: string) => void): Promise<Partial<Recipe>> {
   if (job.kind === 'url') {
     const { recipe, method } = await parseUrlToRecipe(job.url!, setMethod);
@@ -164,19 +179,13 @@ async function parseJob(job: ImportJob, setMethod: (m: string) => void): Promise
   // photo
   const photo = photoPayloads.get(job.id);
   if (!photo) throw new Error('The photo is no longer available. Add it again.');
-  let parsed: Partial<Recipe>;
-  if (await isGeminiAvailable()) {
-    try {
-      setMethod('Gemini vision');
-      parsed = await parseRecipeWithGemini(photo.dataUrl, true);
-    } catch {
-      setMethod('OCR (Tesseract)');
-      parsed = await parsePhotoToRecipe(photo.dataUrl);
-    }
-  } else {
-    setMethod('OCR (Tesseract)');
-    parsed = await parsePhotoToRecipe(photo.dataUrl);
+  // Photos are read by the AI model only: the old text scanner (Tesseract) misread cookbook pages badly
+  // (wrong language model, merged columns), and a junk recipe is worse than a clear error you can retry.
+  if (!(await isGeminiAvailable())) {
+    throw new Error('Reading a photo needs the AI key. Add one in Settings, then retry.');
   }
+  setMethod('AI vision');
+  const parsed = await withRetries(() => parseRecipeWithGemini(photo.dataUrl, true), setMethod, 'AI vision');
   return { ...parsed, image: photo.dataUrl };
 }
 

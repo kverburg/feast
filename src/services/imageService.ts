@@ -68,7 +68,7 @@ export async function uploadRecipeImage(file: File): Promise<string> {
   return blobToDataUrl(blob);
 }
 
-/** A photo of a recipe page, shrunk for scanning (OCR or AI) and returned as a data URL. */
+/** A photo of a recipe page, shrunk for the AI to read, returned as a data URL. */
 export async function photoToScanDataUrl(file: File): Promise<string> {
   if (!file.type.startsWith('image/')) throw new Error('That file is not an image.');
   return blobToDataUrl(await resizeToJpeg(file, SCAN_DIMENSION));

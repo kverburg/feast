@@ -94,7 +94,7 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({ onManualAd
 
             <button className={`import-tab ${activeTab === 'photo' ? 'active' : ''}`} onClick={() => switchTab('photo')}>
               <Camera size={18} />
-              <span>Photo / OCR</span>
+              <span>Photo</span>
             </button>
 
             <button className={`import-tab ${activeTab === 'manual' ? 'active' : ''}`} onClick={() => switchTab('manual')}>
@@ -177,10 +177,10 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({ onManualAd
             </form>
           )}
 
-          {/* Photo OCR Tab Content */}
+          {/* Photo tab content */}
           {activeTab === 'photo' && (
             <div className="tab-content">
-              <p className="tab-hint">Upload a clear photo or screenshot of a cookbook page or recipe card.</p>
+              <p className="tab-hint">Upload a photo or screenshot of a cookbook page or recipe card. The AI reads it, which can take a minute.</p>
 
               <div className="file-dropzone card">
                 {imagePreview ? (
