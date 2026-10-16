@@ -14,6 +14,8 @@ export interface Meal {
   recipes: MealRecipe[];
   archived: boolean;
   createdAt: string;
+  date?: string; // YYYY-MM-DD, optional
+  attendeeIds?: string[]; // ids from the people list (Settings), optional
 }
 
 export interface CombinedIngredient {

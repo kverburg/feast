@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { UtensilsCrossed, Plus, Minus, X, ShoppingBag, Search, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
+import { CalendarDays, UtensilsCrossed, Plus, Minus, X, ShoppingBag, Search, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
 import { Recipe, ShoppingItem } from '../types/recipe';
 import { recipeMatchesQuery } from '../services/search';
+import { usePeople, addPerson } from '../services/peopleService';
 import { Meal, combineIngredients, toShoppingItems } from '../services/mealService';
 
 interface MealsProps {
@@ -19,6 +20,10 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
   const [pickerMealId, setPickerMealId] = useState<string | null>(null);
   const [pickerSearch, setPickerSearch] = useState('');
   const [excluded, setExcluded] = useState<Set<string>>(new Set()); // active meals left out of the combined list
+
+  const people = usePeople();
+  const [newPersonFor, setNewPersonFor] = useState<string | null>(null); // meal that is adding a new person
+  const [newPersonName, setNewPersonName] = useState('');
 
   const recipeById = useMemo(() => new Map(recipes.map((r) => [r.id, r])), [recipes]);
   const activeMeals = meals.filter((m) => !m.archived);
@@ -78,6 +83,20 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
       else next.add(id);
       return next;
     });
+
+  const addAttendee = (mealId: string, personId: string) =>
+    updateMeal(mealId, (m) => ({ ...m, attendeeIds: [...new Set([...(m.attendeeIds || []), personId])] }));
+
+  const removeAttendee = (mealId: string, personId: string) =>
+    updateMeal(mealId, (m) => ({ ...m, attendeeIds: (m.attendeeIds || []).filter((id) => id !== personId) }));
+
+  const submitNewPerson = (e: React.FormEvent, mealId: string) => {
+    e.preventDefault();
+    const person = addPerson(newPersonName);
+    if (person) addAttendee(mealId, person.id);
+    setNewPersonName('');
+    setNewPersonFor(null);
+  };
 
   const pickerRecipes = recipes.filter((r) => recipeMatchesQuery(r, pickerSearch));
 
@@ -160,6 +179,69 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
                       </button>
                     </>
                   )}
+                </div>
+              </div>
+
+              <div className="meals-details">
+                <label className="meals-date">
+                  <CalendarDays size={14} />
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={meal.date || ''}
+                    disabled={view !== 'active'}
+                    onChange={(e) => updateMeal(meal.id, (m) => ({ ...m, date: e.target.value || undefined }))}
+                    aria-label="Date"
+                  />
+                </label>
+                <div className="meals-people">
+                  {(meal.attendeeIds || [])
+                    .map((id) => people.find((p) => p.id === id))
+                    .filter((p): p is NonNullable<typeof p> => !!p)
+                    .map((p) => (
+                      <span key={p.id} className="meals-chip">
+                        {p.name}
+                        {view === 'active' && (
+                          <button onClick={() => removeAttendee(meal.id, p.id)} aria-label={`Remove ${p.name}`}>
+                            <X size={11} />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                  {view === 'active' &&
+                    (newPersonFor === meal.id ? (
+                      <form className="meals-newperson" onSubmit={(e) => submitNewPerson(e, meal.id)}>
+                        <input
+                          autoFocus
+                          className="input-field"
+                          placeholder="Name"
+                          value={newPersonName}
+                          onChange={(e) => setNewPersonName(e.target.value)}
+                        />
+                        <button type="submit" className="btn btn-primary btn-sm" disabled={!newPersonName.trim()}>Add</button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setNewPersonFor(null)}>Cancel</button>
+                      </form>
+                    ) : (
+                      <select
+                        className="select-field meals-people-select"
+                        value=""
+                        aria-label="Add attendee"
+                        onChange={(e) => {
+                          if (e.target.value === '__new') {
+                            setNewPersonName('');
+                            setNewPersonFor(meal.id);
+                          } else if (e.target.value) addAttendee(meal.id, e.target.value);
+                        }}
+                      >
+                        <option value="">+ Attendee…</option>
+                        {people
+                          .filter((p) => !(meal.attendeeIds || []).includes(p.id))
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        <option value="__new">New person…</option>
+                      </select>
+                    ))}
                 </div>
               </div>
 
@@ -274,6 +356,15 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
         .meals-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1.25rem; }
         .meals-title-box { display: flex; align-items: center; gap: 1rem; }
         .meals-icon { width: 48px; height: 48px; border-radius: 14px; background: var(--accent-gradient); display: flex; align-items: center; justify-content: center; }
+        .meals-details { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; }
+        .meals-date { display: flex; align-items: center; gap: 0.4rem; color: var(--text-muted); }
+        .meals-date .input-field { width: auto; padding: 0.35rem 0.5rem; }
+        .meals-people { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+        .meals-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.6rem; border-radius: var(--radius-full); background: var(--badge-bg); color: var(--accent-primary); font-size: 0.85rem; font-weight: 600; }
+        .meals-chip button { background: none; border: none; color: inherit; display: flex; padding: 0; cursor: pointer; }
+        .meals-people-select { width: auto; padding: 0.3rem 0.5rem; font-size: 0.85rem; }
+        .meals-newperson { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+        .meals-newperson .input-field { width: 140px; padding: 0.35rem 0.5rem; }
         .meals-sub { color: var(--text-muted); font-size: 0.9rem; margin: 0; }
         .meals-new { display: flex; gap: 0.5rem; flex: 1; max-width: 460px; min-width: 240px; }
         .meals-tabs { display: flex; gap: 0.5rem; }

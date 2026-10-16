@@ -11,6 +11,7 @@ const SYNCED_KEYS: Record<string, string> = {
   gourmet_craft_recipes_v1: 'recipes',
   gourmet_craft_shopping_v1: 'shopping',
   gourmet_craft_meals_v1: 'meals',
+  gourmet_craft_people_v1: 'people',
   gourmet_craft_gemini_key_v1: 'geminiKey',
 };
 
