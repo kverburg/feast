@@ -9,6 +9,7 @@ import { execSync } from 'node:child_process';
 import { generateContent } from '../worker/gemini.js';
 import { buildTranslationRequest, parseTranslation, buildAnnotationRequest, parseAnnotation, readJson } from '../src/shared/geminiTasks.ts';
 import { INITIAL_RECIPES } from '../src/services/storageService.ts';
+import { classifyGeminiError } from '../src/shared/geminiErrors.ts';
 import { kvClient } from './kv.mjs';
 import { checkTranslation, checkAnnotation, scoreOf, summarize } from './checks.mjs';
 
@@ -26,7 +27,7 @@ if (fs.existsSync('.env.local')) {
 
 const task = args.task || 'translate';
 const provider = args.provider || 'gemini';
-const gap = Number(args.gap ?? 1100); // Mistral's free tier allows about 1 request per second
+const gap = Number(args.gap ?? (provider === 'gemini' ? 6500 : 1100)); // free tiers: Mistral about 1 request per second, Gemini Flash about 10 per minute
 const limit = args.limit ? Number(args.limit) : Infinity;
 if (!['translate', 'annotate'].includes(task)) throw new Error('--task must be translate or annotate');
 if (!['gemini', 'mistral'].includes(provider)) throw new Error('--provider must be gemini or mistral');
@@ -83,7 +84,17 @@ for (const c of cases) {
   const started = Date.now();
   let tokens;
   const generate = async (body, tier) => {
-    const out = await generateContent(env, withContext(body), tier);
+    // rate limits and server errors are not the model's score: wait and try again (up to 3 times)
+    let out;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        out = await generateContent(env, withContext(body), tier);
+        break;
+      } catch (e) {
+        if (classifyGeminiError(e) !== 'transient' || attempt >= 3) throw e;
+        await sleep([15000, 45000, 90000][attempt]);
+      }
+    }
     const u = out?.usageMetadata;
     if (u) tokens = { input: u.promptTokenCount || 0, output: u.candidatesTokenCount || 0 };
     return out;
