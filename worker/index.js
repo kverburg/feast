@@ -60,6 +60,16 @@ async function handleWork(url, req, env, ctx) {
     return json({ ok: true, removed: await acknowledge(env, body && body.keys) });
   }
 
+  if (url.pathname === '/api/work/retry' && req.method === 'POST') {
+    const doc = await readWork(env);
+    doc.status = { state: 'idle', note: '', nextAt: 0, failures: 0, updatedAt: Date.now() };
+    doc.attempts = {};
+    doc.batchOff = null;
+    await writeWork(env, doc);
+    if (ctx) ctx.waitUntil(processWork(env, { log }));
+    return json({ ok: true });
+  }
+
   if (url.pathname === '/api/work' && req.method === 'GET') {
     const enabled = !!env.GEMINI_API_KEY; // the server needs its own Gemini key to work in the background
     const [doc, pending] = enabled ? await Promise.all([readWork(env), pendingEntries(env)]) : [null, []];
@@ -163,7 +173,7 @@ async function route(req, env, ctx) {
   const isImage = url.pathname === '/api/image' || url.pathname.startsWith('/api/image/');
   const isActivity = url.pathname === '/api/activity';
   const isClientLog = url.pathname === '/api/log';
-  const isWork = url.pathname === '/api/work' || url.pathname === '/api/work/ack';
+  const isWork = url.pathname === '/api/work' || url.pathname === '/api/work/ack' || url.pathname === '/api/work/retry';
   if (!isState && !isGemini && !isImage && !isActivity && !isClientLog && !isWork) return env.ASSETS.fetch(req);
 
   // Cloudflare Access adds this header after login. Without it, refuse.

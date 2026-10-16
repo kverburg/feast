@@ -91,7 +91,7 @@ export async function generateContent(env, body, tier, log = () => {}) {
       error: res.ok ? undefined : text.slice(0, 300),
     });
     if (res.status === 404 && i < models.length - 1) continue;
-    if (!res.ok) throw new GeminiHttpError(res.status);
+    if (!res.ok) throw new GeminiHttpError(res.status, text.slice(0, 500));
     return JSON.parse(text);
   }
   throw new GeminiHttpError(404);

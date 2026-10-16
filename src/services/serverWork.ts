@@ -43,6 +43,15 @@ export async function fetchServerWork(): Promise<ServerWork | null> {
   }
 }
 
+/** Clear a stopped or backing-off state and the give-ups on the server, and let it try again right away. */
+export async function retryServerWork(): Promise<void> {
+  try {
+    await fetch('/api/work/retry', { method: 'POST' });
+  } catch {
+    // no server: the local queue simply starts again
+  }
+}
+
 /** Tell the worker which patches were applied, so it can forget them. */
 export async function acknowledgePatches(keys: string[]): Promise<void> {
   if (keys.length === 0) return;

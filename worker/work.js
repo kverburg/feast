@@ -404,7 +404,7 @@ async function processDirect(env, doc, entries, { budgetMs = 20000, log = () => 
       // key missing or rejected: stop, and look again later
       doc.status = {
         state: 'stopped',
-        note: e instanceof GeminiHttpError ? `Gemini rejected the request (status ${e.status}): check the API key. Recipes stay as they are until it works.` : `Gemini could not be used: ${reason}`,
+        note: e instanceof GeminiHttpError ? `Gemini rejected the request (${reason.replace('Gemini API returned ', '')}). Recipes stay as they are until it works.` : `Gemini could not be used: ${reason}`,
         nextAt: Date.now() + STOPPED_RETRY_MS,
         failures: (doc.status.failures || 0) + 1,
         updatedAt: Date.now(),
