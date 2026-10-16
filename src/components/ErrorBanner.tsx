@@ -45,6 +45,10 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({ message, actionLabel, 
         flex: 1;
         color: var(--text-main);
       }
+      @media (max-width: 600px) {
+        .error-banner { padding: 0.75rem 1rem; gap: 0.5rem; }
+        .error-banner-text { flex: 1 1 calc(100% - 40px); min-width: 0; }
+      }
     `}</style>
   </div>
 );

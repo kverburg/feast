@@ -376,11 +376,13 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           font-size: 1rem;
           margin-bottom: 1.5rem;
         }
+        /* Stats and buttons form one 2x2 block: equal columns, equal heights */
         .hero-stats {
-          display: flex;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
           gap: 1rem;
-          flex-wrap: wrap;
-          margin-bottom: 1.5rem;
+          max-width: 460px;
+          margin-bottom: 1rem;
         }
         .stat-card {
           display: flex;
@@ -412,14 +414,21 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           color: var(--text-main);
         }
         .hero-cta-bar {
-          display: flex;
-          align-items: center;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
           gap: 1rem;
+          max-width: 460px;
         }
-        .btn-cook-mode {
-          padding: 0.85rem 1.75rem;
-          font-size: 1.05rem;
+        .hero-cta-bar .btn {
+          width: 100%;
+          justify-content: center;
+          box-sizing: border-box;
+          min-height: 52px;
+          font-size: 1rem;
         }
+        .hero-cta-bar .btn:only-child { grid-column: 1 / -1; }
+        .scaler-input::-webkit-inner-spin-button,
+        .scaler-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         @media (max-width: 600px) {
           .hero-content {
             padding: 1.25rem;
@@ -521,8 +530,10 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           gap: 0.35rem;
         }
         .scaler-btn {
-          width: 32px;
-          height: 32px;
+          box-sizing: border-box;
+          width: 36px;
+          height: 36px;
+          padding: 0;
           border-radius: var(--radius-sm);
           background: var(--bg-card);
           border: 1px solid var(--border-color);
@@ -535,8 +546,11 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           color: #ffffff;
         }
         .scaler-input {
-          width: 48px;
-          height: 32px;
+          box-sizing: border-box;
+          -moz-appearance: textfield;
+          appearance: textfield;
+          width: 52px;
+          height: 36px;
           text-align: center;
           background: var(--bg-input);
           border: 1px solid var(--border-color);
