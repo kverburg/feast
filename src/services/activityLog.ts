@@ -19,6 +19,7 @@ export interface LogEntry {
   status: LogStatus;
   updated: number; // ms, decides which side wins when merging devices
   device: string;
+  session?: string; // the page load that runs it: tells a closed page from another open tab
 }
 
 const STORAGE_KEY = 'gourmet_craft_activity_v1';
@@ -60,16 +61,83 @@ let lastPushed = 0;
 let pushTimer: number | undefined;
 const listeners = new Set<() => void>();
 
-// Entries this device left running when the page closed will never finish.
-const now0 = Date.now();
+// ---- which page is alive ----
+// Imports, translations and annotations run inside the page. If the page is closed or reloaded, what it
+// was running never finishes. Every page load gets a session id and keeps a heartbeat in localStorage,
+// so a second open tab or window does not mistake the first one's work for abandoned work.
+const SESSION = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+const ALIVE_KEY = 'gourmet_craft_alive_v1';
+const BEAT_MS = 5000;
+const STALE_MS = 150000; // background tabs run their timers slowly: allow a generous gap
 const me = deviceId();
-entries = entries.map((e) =>
-  e.device === me && (e.status === 'running' || e.status === 'retrying')
-    ? { ...e, status: 'failed' as LogStatus, detail: 'Interrupted (app was closed)', ended: new Date(now0).toISOString(), updated: now0 }
-    : e
-);
+
+const readAlive = (): Record<string, number> => {
+  try {
+    return JSON.parse(localStorage.getItem(ALIVE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+};
+
+const writeAlive = (map: Record<string, number>) => {
+  try {
+    localStorage.setItem(ALIVE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+};
+
+const beat = () => {
+  const map = readAlive();
+  const now = Date.now();
+  map[SESSION] = now;
+  for (const [id, ts] of Object.entries(map)) if (now - ts > 86400000) delete map[id];
+  writeAlive(map);
+};
+
+const INTERRUPTED_DETAIL = 'Interrupted: the page was closed or reloaded while this ran. It starts again the next time the app is open.';
+
+// Entries of this device whose page is gone will never finish: mark them. Returns true when any changed.
+function sweepInterrupted(): boolean {
+  const alive = readAlive();
+  const now = Date.now();
+  let changed = false;
+  entries = entries.map((e) => {
+    if (e.device !== me || (e.status !== 'running' && e.status !== 'retrying')) return e;
+    const ts = e.session ? alive[e.session] : undefined;
+    if (e.session === SESSION || (ts !== undefined && now - ts < STALE_MS)) return e;
+    changed = true;
+    // "ended" is the last sign of life, so the duration is not stretched until the next page load
+    return { ...e, status: 'failed' as LogStatus, detail: INTERRUPTED_DETAIL, ended: new Date(e.updated).toISOString(), updated: now };
+  });
+  return changed;
+}
+
+beat();
+sweepInterrupted();
+if (typeof window !== 'undefined') {
+  const timer = window.setInterval(() => {
+    beat();
+    if (sweepInterrupted()) persist();
+  }, BEAT_MS);
+  (timer as unknown as { unref?: () => void }).unref?.();
+  // Closing or reloading the page: say so right away, so the next load does not wait for the heartbeat to go stale
+  window.addEventListener('pagehide', (event) => {
+    if ((event as PageTransitionEvent).persisted) return; // page may come back from the back/forward cache
+    const map = readAlive();
+    delete map[SESSION];
+    writeAlive(map);
+  });
+}
 
 const persist = () => {
+  // Another open tab may have logged things since this one loaded: merge instead of overwriting
+  const stored = new Map(load().map((e) => [e.id, e]));
+  for (const e of entries) {
+    const other = stored.get(e.id);
+    if (!other || e.updated >= other.updated) stored.set(e.id, e);
+  }
+  entries = [...stored.values()];
   entries = entries.sort((a, b) => b.started.localeCompare(a.started)).slice(0, MAX_ENTRIES);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
@@ -90,7 +158,7 @@ export function subscribeLog(cb: () => void): () => void {
 export function startLog(kind: LogKind, label: string, method?: string, recipeId?: string): string {
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   entries = [
-    { id, kind, label, method, recipeId, started: new Date().toISOString(), status: 'running', updated: Date.now(), device: deviceId() },
+    { id, kind, label, method, recipeId, started: new Date().toISOString(), status: 'running', updated: Date.now(), device: deviceId(), session: SESSION },
     ...entries,
   ];
   persist();
