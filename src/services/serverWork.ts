@@ -1,5 +1,6 @@
 // Talks to the worker about background work (translating and annotating recipes), see worker/work.js.
 import type { GeminiTranslation, AnnotationResult } from '../shared/geminiTasks';
+import type { Recipe } from '../types/recipe';
 
 export interface ServerStatus {
   state: 'idle' | 'working' | 'waiting' | 'stopped';
@@ -21,13 +22,15 @@ interface PatchBase {
 
 export type ServerPatch =
   | (PatchBase & { kind: 't'; method?: string; result?: GeminiTranslation })
+  | (PatchBase & { kind: 'p'; method?: string; result?: Partial<Recipe> }) // a photo import read by the server
   | (PatchBase & { kind: 'a'; method?: string; result?: { main: AnnotationResult; en?: AnnotationResult } });
 
 export interface ServerWork {
   enabled: boolean; // the worker has its own Gemini key, so it can work while the app is closed
   status: ServerStatus | null;
   patches: ServerPatch[];
-  pending: number; // how many recipes the worker knows are waiting
+  pending: number; // how many recipes and photo imports the worker knows are waiting
+  imports?: number; // photo imports on the server that are not read yet
   batches?: { name: string; model: string; submittedAt: number; items: { key: string; label?: string }[] }[]; // in flight at Gemini
   batch?: { active: number; off: string | null }; // Gemini batch jobs in flight; off: why direct calls are used instead
 }
@@ -49,6 +52,20 @@ export async function retryServerWork(): Promise<void> {
     await fetch('/api/work/retry', { method: 'POST' });
   } catch {
     // no server: the local queue simply starts again
+  }
+}
+
+/** Hand a photo (already uploaded to /api/image) to the server to read. False when the server refuses it. */
+export async function registerServerImport(id: string, imageUrl: string, fileName: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/work/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, imageUrl, fileName }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 

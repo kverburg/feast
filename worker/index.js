@@ -1,5 +1,5 @@
 import { geminiProxy } from './gemini.js';
-import { processWork, readWork, acknowledge, clipWorkList, pendingEntries } from './work.js';
+import { processWork, readWork, acknowledge, clipWorkList, pendingEntries, addImport } from './work.js';
 import { aiReady } from './providers.js';
 
 // Feast: serves the app (static assets) and stores one shared state in KV.
@@ -61,6 +61,14 @@ async function handleWork(url, req, env, ctx) {
     return json({ ok: true, removed: await acknowledge(env, body && body.keys) });
   }
 
+  if (url.pathname === '/api/work/import' && req.method === 'POST') {
+    let body;
+    try { body = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
+    if (!(await addImport(env, body))) return json({ error: 'rejected' }, 400);
+    if (ctx) ctx.waitUntil(processWork(env, { log }));
+    return json({ ok: true });
+  }
+
   if (url.pathname === '/api/work/retry' && req.method === 'POST') {
     const doc = await readWork(env);
     doc.status = { state: 'idle', note: '', nextAt: 0, failures: 0, updatedAt: Date.now() };
@@ -81,7 +89,8 @@ async function handleWork(url, req, env, ctx) {
       enabled,
       status: doc ? doc.status : null,
       patches: doc ? doc.patches : [],
-      pending: pending.length,
+      pending: pending.length + (doc ? doc.imports.length : 0),
+      imports: doc ? doc.imports.length : 0,
       // recipes whose requests are with Gemini's batch queue, so the app can show them as "waiting on response"
       batches: doc ? doc.batches.map((b) => ({ name: b.name, model: b.model, submittedAt: b.submittedAt, items: b.items.map((i) => ({ key: i.key, label: i.label })) })) : [],
       batch: { active: doc ? doc.batches.length : 0, off: env.GEMINI_BATCH === 'off' ? 'Batch is switched off; using direct calls' : batchOff },
@@ -187,7 +196,7 @@ async function route(req, env, ctx) {
   const isImage = url.pathname === '/api/image' || url.pathname.startsWith('/api/image/');
   const isActivity = url.pathname === '/api/activity';
   const isClientLog = url.pathname === '/api/log';
-  const isWork = url.pathname === '/api/work' || url.pathname === '/api/work/ack' || url.pathname === '/api/work/retry';
+  const isWork = url.pathname === '/api/work' || url.pathname === '/api/work/ack' || url.pathname === '/api/work/retry' || url.pathname === '/api/work/import';
   const isBench = url.pathname === '/api/bench' || url.pathname === '/api/bench/run';
   if (!isState && !isBench && !isGemini && !isImage && !isActivity && !isClientLog && !isWork) return env.ASSETS.fetch(req);
 

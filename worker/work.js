@@ -19,6 +19,7 @@ import {
   parseAnnotation,
   readJson,
 } from '../src/shared/geminiTasks.ts';
+import { buildImportRequest, parseImportResponse } from '../src/shared/importTasks.ts';
 import { classifyGeminiError, GeminiHttpError } from '../src/shared/geminiErrors.ts';
 import { contentHash, annotationSource, isUntouchedPending, needsAnnotation } from '../src/shared/recipeWork.ts';
 import { generateContent, batchModelCandidates, submitBatch, getBatch } from './gemini.js';
@@ -35,7 +36,7 @@ const METADATA_LIMIT = 1000; // KV allows 1024 bytes
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const emptyWork = () => ({ patches: [], attempts: {}, batches: [], batchModel: '', batchOff: null, status: { state: 'idle', note: '', nextAt: 0, failures: 0, updatedAt: 0 } });
+export const emptyWork = () => ({ patches: [], imports: [], attempts: {}, batches: [], batchModel: '', batchOff: null, status: { state: 'idle', note: '', nextAt: 0, failures: 0, updatedAt: 0 } });
 
 export async function readWork(env) {
   try {
@@ -106,8 +107,17 @@ export async function processWork(env, opts = {}) {
 
   const allEntries = await pendingEntries(env);
   let doc = await readWork(env);
-  if (allEntries.length === 0 && doc.batches.length === 0) return 'idle';
+  if (allEntries.length === 0 && doc.batches.length === 0 && doc.imports.length === 0) return 'idle';
   if (doc.status.nextAt > Date.now()) return 'backing_off';
+
+  // Photo imports first: you are waiting for them, and they need direct calls
+  let importResult = 'none';
+  if (doc.imports.length > 0) {
+    importResult = await processImports(env, doc, opts);
+    doc = await readWork(env);
+    if (doc.status.nextAt > Date.now()) return importResult;
+    if (allEntries.length === 0 && doc.batches.length === 0) return importResult;
+  }
 
   // Live work (recipes you just imported or re-parsed) first, with direct calls: you are waiting for it.
   // Everything else goes through the batch.
@@ -307,6 +317,103 @@ async function submitNewBatch(env, doc, entries, log) {
   await writeWork(env, doc);
   log('warn', { event: 'batch_unavailable', status: lastStatus });
   return 'batch_unavailable';
+}
+
+// ---- photo imports ----------------------------------------------------------------------------------------
+// The app uploads the photo (/api/image) and registers it here; the worker reads it with the AI and leaves the
+// recipe as a patch of kind "p" for the app to save, also when the app is closed in between.
+
+const MAX_IMPORTS_QUEUED = 20;
+const IMAGE_ID = /^\/api\/image\/([0-9a-f-]{36})$/;
+
+/** Register a photo import. Returns false for a bad request or a full queue. */
+export async function addImport(env, entry) {
+  const id = String(entry && entry.id || '');
+  const m = IMAGE_ID.exec(String(entry && entry.imageUrl || ''));
+  if (!/^[A-Za-z0-9_-]{1,60}$/.test(id) || !m) return false;
+  const doc = await readWork(env);
+  if (doc.imports.length >= MAX_IMPORTS_QUEUED) return false;
+  if (!doc.imports.some((i) => i.id === id) && !doc.patches.some((p) => p.id === id)) {
+    doc.imports.push({ id, imageUrl: entry.imageUrl, fileName: String(entry.fileName || 'Photo').slice(0, 120), createdAt: Date.now() });
+    delete doc.attempts[`p|${id}`];
+    await writeWork(env, doc);
+  }
+  return true;
+}
+
+const toBase64 = (buffer) => {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+};
+
+// Done with an import: drop it from the queue (in the stored copy, which may have new ones) and keep its patch
+async function finishImport(env, doc, imp, patch) {
+  doc = await freshCopy(env, doc);
+  doc.imports = doc.imports.filter((i) => i.id !== imp.id);
+  if (!doc.patches.some((p) => p.key === patch.key)) doc.patches.push(patch);
+  delete doc.attempts[patch.key];
+  await writeWork(env, doc);
+  return doc;
+}
+
+async function processImports(env, doc, { budgetMs = 20000, log = () => {} } = {}) {
+  const started = Date.now();
+  let processed = 0;
+  for (const imp of [...doc.imports]) {
+    if (Date.now() - started > budgetMs) break;
+    const key = `p|${imp.id}`;
+    const startedAt = Date.now();
+    const base = { key, id: imp.id, kind: 'p', hash: '-', label: imp.fileName, startedAt };
+    try {
+      const imageId = IMAGE_ID.exec(imp.imageUrl)[1];
+      const { value, metadata } = await env.FEAST.getWithMetadata(`img:${imageId}`, 'arrayBuffer');
+      if (!value) {
+        doc = await finishImport(env, doc, imp, { ...base, endedAt: Date.now(), gaveUp: true, error: 'The uploaded photo is no longer on the server. Add it again.' });
+        continue;
+      }
+      const request = buildImportRequest({ imageBase64: toBase64(value), mimeType: (metadata && metadata.type) || 'image/jpeg' });
+      const result = parseImportResponse(await generateContent(env, request, 'default', log));
+      doc = await finishImport(env, doc, imp, { ...base, endedAt: Date.now(), result: { ...result, image: imp.imageUrl }, method: 'AI vision (server)', calls: 1 });
+      doc.status = { state: 'working', note: '', nextAt: 0, failures: 0, updatedAt: Date.now() };
+      await writeWork(env, doc);
+      processed += 1;
+      log('info', { event: 'import_done', kind: 'photo', ms: Date.now() - startedAt });
+    } catch (e) {
+      const kind = classifyGeminiError(e);
+      const reason = e instanceof Error ? e.message : String(e);
+      doc = await freshCopy(env, doc);
+      if (kind === 'transient') {
+        const failures = (doc.status.failures || 0) + 1;
+        const wait = backoffFor(failures);
+        doc.status = { state: 'waiting', note: `Gemini is rate limiting or unavailable (${reason}); trying again in ${Math.round(wait / 60000)} min`, nextAt: Date.now() + wait, failures, updatedAt: Date.now() };
+        await writeWork(env, doc);
+        log('warn', { event: 'import_waiting', reason, waitMs: wait });
+        return 'rate_limited';
+      }
+      if (kind === 'other') {
+        const attempts = (doc.attempts[key] || 0) + 1;
+        doc.attempts[key] = attempts;
+        if (attempts >= MAX_BAD_OUTPUT_ATTEMPTS) {
+          doc = await finishImport(env, doc, imp, { ...base, endedAt: Date.now(), gaveUp: true, error: `${reason} (gave up after ${attempts} attempts)` });
+        } else await writeWork(env, doc);
+        log('warn', { event: 'import_bad_output', reason, attempts });
+        continue;
+      }
+      doc.status = {
+        state: 'stopped',
+        note: e instanceof GeminiHttpError ? `Gemini rejected the request (${reason.replace('Gemini API returned ', '')}). Recipes stay as they are until it works.` : `Gemini could not be used: ${reason}`,
+        nextAt: Date.now() + STOPPED_RETRY_MS,
+        failures: (doc.status.failures || 0) + 1,
+        updatedAt: Date.now(),
+      };
+      await writeWork(env, doc);
+      log('error', { event: 'import_stopped', reason });
+      return 'stopped';
+    }
+  }
+  return processed > 0 ? 'processed' : 'skipped';
 }
 
 // ---- direct calls (fallback) ------------------------------------------------------------------------------
