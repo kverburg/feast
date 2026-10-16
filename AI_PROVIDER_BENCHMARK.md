@@ -1,76 +1,51 @@
 # Switching the AI provider (Mistral) and a long-running benchmark
 
-Status: proposal, nothing built yet. Decisions that need you are marked **Decide**.
+The plan and what is left. How to use what exists: `AI_PROVIDERS.md` (providers) and `BENCHMARK.md` (running the benchmark).
 
-## Where we are
+## Status
 
-All AI work is three tasks, each a prompt plus a parser in `src/shared/geminiTasks.ts` (and `recipeParserService.ts` for import parsing):
+| Step | What | State |
+|---|---|---|
+| 1 | Provider switch: Mistral next to Gemini, per tier, by configuration | Done (PR 27) |
+| 2 | Benchmark runner, automatic checks, results in Cloudflare KV, Settings > AI benchmark page, weekly workflow | Done (PR 28) |
+| 3 | Model-judged translation quality; import parsing as a third task; your own golden recipes | Open |
+| 4 | Prompt context: instructions, glossary, worked examples, tested as prompt versions | Open (hook exists: `--context`) |
+| 5 | First real comparison Gemini vs Mistral, then a per-task decision | Open |
+| 6 | Use a winning context or provider in production | Open |
 
-| Task | Input | Output | Model tier |
-|---|---|---|---|
-| translate | a recipe | NL/EN translation, ingredient and step texts | default |
-| annotate | ingredients + steps | ingredient name forms, step quantity references | light |
-| parse (import) | page text, pasted text or photo | a structured recipe | default |
+## How it fits together
 
-The tasks never talk to Gemini directly: they call an injected `generate(body, tier)`. The worker (`worker/gemini.js`, `worker/work.js`) supplies that function, plus the Gemini batch API. So a second provider is a new `generate`, not a rewrite. Two things are Gemini-shaped and need care: the request body (`contents`, `generationConfig`, JSON mode) and the batch API.
+The tasks (translate, annotate, import parsing) build provider-neutral prompts in `src/shared/geminiTasks.ts`. `worker/providers.js` sends them to Gemini or Mistral and returns Gemini-shaped answers, so the parsers do not care. `AI_PROVIDER` and `AI_PROVIDER_LIGHT` choose the provider per tier; Gemini stays the default.
 
-## Part 1: making providers swappable
+The benchmark (`bench/run.mjs`) runs a task over the golden recipes with a chosen provider, model and optional context file, scores it with automatic checks (`bench/checks.mjs`) and stores the run in Cloudflare KV (`bench:index`, `bench:run:<id>`). The app reads them in Settings > AI benchmark. A weekly GitHub workflow runs the current setups on the test keys, so silent model changes behind aliases like `gemini-flash-latest` show up as a drop in the trend. The golden set and the context files stay in git; only the results live in Cloudflare.
 
-1. **Provider interface.** `generate(task, messages, { tier, json, schema })` returns parsed JSON. Each provider (Gemini, Mistral) maps this to its own request format. The prompt builders return provider-neutral messages instead of Gemini bodies.
-2. **Config per task.** Environment variables `AI_PROVIDER_TRANSLATE`, `AI_PROVIDER_ANNOTATE`, `AI_PROVIDER_PARSE` (each `gemini` or `mistral`, plus model name). The default stays Gemini, so nothing changes until we flip a switch. A task can fall back to the other provider on rate limits.
-3. **Batch.** Mistral has its own batch API (to be verified against their docs before building). Until the Mistral batch path exists, Mistral tasks run as direct calls in the existing background worker, which already handles backoff.
-4. **Errors.** `classifyGeminiError` becomes provider-independent (rate limit, server, bad key, refused request), reusing the 400 handling from PR 22.
-5. **Keys.** A `MISTRAL_API_KEY` secret per environment, handled like the Gemini keys (`GEMINI_KEYS.md`).
+## What is left
 
-## Part 2: the benchmark
+### Step 3: judged quality and a bigger golden set
+- A judge model scores translation fluency and faithfulness against the source, without knowing which provider made the candidate. Use a provider that is not the one being scored. Check it against a small hand-rated sample every month; if it disagrees with you, ignore its scores.
+- Import parsing as a third task: raw inputs (page text, pasted text, a few photos) with a checklist of what must be extracted (ingredient count, amounts, steps). Include the imports that failed before (miljuschka, bakingmischief).
+- Your own recipes in `bench/golden/` (export from Settings). Today the set is only the three seed recipes in both directions, which is small: scores will be noisy until it grows to 30 to 50 recipes with sections, fractions, ranges and "to taste" amounts.
 
-Goal: answer "is provider/model/prompt X as good as what we run today, and is it getting better or worse over time?" with data, repeatedly, not once.
+### Step 4: context for better calls
+Candidates, each a context file under `bench/contexts/` and therefore a named prompt version:
+- Few-shot examples: two or three corrected recipes as worked examples. Usually the biggest gain for structured tasks.
+- Glossary and style guide: fixed terms ("bloem" is flour), preferred Dutch cooking words, unit conventions, keep brand names.
+- Rules from past failures: one line per mistake, kept only if the benchmark shows it helps without hurting other recipes.
+- Better inputs for import: the page's structured recipe data (schema.org JSON-LD) or cleaned page text.
+Strict JSON schemas for the output are worth trying per provider.
 
-### Golden set (`bench/golden/`)
-- 30 to 50 recipes: the seed recipes, your real recipes, and the ones that failed before (miljuschka, bakingmischief, Cookmate samples). Both languages, with and without sections, with fractions, ranges and "to taste" amounts.
-- For import parsing: the raw inputs (HTML text, pasted text, a few photos) next to the expected structured recipe.
-- Expected outputs start as the current Gemini output, which you review and correct once. After that they are the reference. Stored in git, so changes to the reference are visible.
-- **Decide:** are you fine with recipe text being sent to the providers under test? (It already goes to Gemini.)
-
-### Checks per task
-Automatic, no model involved:
-- Valid JSON that passes the existing parser.
-- Counts preserved: same number of ingredients, sections and steps.
-- Numbers preserved: every amount in the source appears in the output.
-- Annotation: every quantity reference points at a real ingredient; no invented ingredients.
-- Translation: no untranslated source sentences left, units kept.
-- Latency, tokens, retries, rate-limit hits.
-
-Judged by a model (translation fluency, faithfulness, naturalness of Dutch cooking language):
-- A judge model from a third provider, or at least not the one being scored, compares candidate against reference without knowing which is which.
-- A small hand-rated sample each month to check that the judge agrees with you. If it does not, the judge scores are ignored.
-
-### Running it
-- `npm run bench -- --task translate --provider mistral --model mistral-small-latest --prompt v2` runs the set and writes `bench/results/<date>-<task>-<provider>-<model>-<prompt>.json` (scores per recipe, plus run metadata: git commit, prompt version, timestamp).
-- `npm run bench:report` builds a comparison table (provider x model x prompt, per task) and a trend over time from the stored runs.
-- A scheduled GitHub Action runs the current production setup weekly and each challenger monthly, commits the results, and opens an issue if the production score drops. That catches silent model changes behind aliases like `gemini-flash-latest`.
-- Prompts are versioned (`prompts/translate.v1.ts`, `v2`, ...). Improving a prompt means adding a version and benchmarking it against the current one on the same set.
-- Costs and limits: free tiers limit requests per minute and per day, so a run paces itself and can resume where it stopped.
-
-### Deciding to switch
+### Step 5: deciding to switch
 A challenger replaces the incumbent for a task when, on the golden set, it:
 - matches or beats on the automatic checks (no regressions on counts and numbers),
 - is within a margin on the judged quality score,
 - is not worse on failure rate and latency,
 - and has acceptable limits and pricing for your use.
 
-Per task, not all or nothing: for example annotate could move to Mistral while translate stays on Gemini.
+Per task, not all or nothing: annotate could move to Mistral while translate stays on Gemini. Mistral's free tier is for evaluation and prototyping (about 1 request per second), so a production move means a paid plan.
 
-## Suggested order
+### Step 6: production use
+A winning context file needs a way into production calls (bundled with the worker, or stored in KV), and a provider switch is the `AI_PROVIDER` settings. Not built until a comparison shows a reason.
 
-1. Provider interface plus a Mistral `generate`, behind config, default unchanged. No behaviour change.
-2. Benchmark skeleton: the golden set for translate only, automatic checks, one report.
-3. Add judged quality and the other two tasks.
-4. Scheduled runs and trend report.
-5. First real comparison (Gemini vs Mistral small and large), then decide per task.
-6. Prompt iteration using the same harness.
-
-## Decide before step 1
-- Which Mistral models to try first (suggest a small and a large one, as with Gemini's light and default).
+## Decisions still open
+- Which Mistral models to compare first (suggest a small and a large one, as with Gemini's light and default).
 - Whether the benchmark may use your real recipes as the golden set (suggest yes, and keep the repo private).
-- Where results live: committed in the repo (simple, diffable) or elsewhere. Suggest the repo.
