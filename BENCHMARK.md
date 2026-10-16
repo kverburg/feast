@@ -20,7 +20,7 @@ A recipe's score is the share of checks passed; a run's score is the mean. Laten
 ## Where results go
 - Always: `.bench-results/<run>.json` (not committed).
 - Cloudflare KV, when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are set: `bench:run:<id>` and the list `bench:index`. The app shows them in Settings > AI benchmark. The token needs Workers KV Storage edit permission.
-- The `AI benchmark` GitHub workflow runs weekly (and by hand) with the `GEMINI_API_KEY_TEST`, `MISTRAL_API_KEY` and Cloudflare secrets.
+- The `AI benchmark` GitHub workflow runs weekly (and by hand) with the `GEMINI_API_KEY_TEST`, `MISTRAL_API_KEY_TEST` and Cloudflare secrets.
 
 ## Contexts and golden recipes
 See `bench/contexts/README.md` and `bench/golden/README.md`.
