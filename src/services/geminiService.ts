@@ -185,7 +185,18 @@ Rules:
 - Ignore menus, ads, comments, related recipes and anything that is not part of this one recipe.
 - "amount" is a number (use decimals for fractions, 1 when unspecified); "unit" is empty when there is none.
 - Use one section called "Ingredients" when the recipe does not split its ingredients into parts.
-- "timerMinutes" only when a step clearly names a duration; otherwise leave it out.`;
+- "timerMinutes" only when a step clearly names a duration; otherwise leave it out.${
+    isImage
+      ? `
+About the photo:
+- It shows a page of a printed cookbook, possibly at an angle or with a handwritten note on it. Cookbook pages often have two columns: ingredients on the left and numbered steps on the right. Read each column on its own and keep the order.
+- The title is the largest heading. Ignore page numbers, section names in the margin, icons and symbols, and handwriting that is not part of the recipe.
+- A line like "VOOR 8 PERSONEN • 30 MINUTEN" or "Serves 8 • 30 minutes" gives "servings" and the total time: split it into "prepTime" and "cookTime" so they add up to the stated total.
+- Put a tip or serving note from a box on the page at the end of "description", starting with "Tip:".
+- Give "timerMinutes" for every step that names a duration; when a step names several, use the longest one.
+- Copy the text exactly as printed, including accents; do not guess words you cannot read: leave the line out instead.`
+      : ''
+  }`;
 
   const contents = isImage
     ? [

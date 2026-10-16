@@ -248,7 +248,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <form onSubmit={handleSaveApiKey} className="api-key-form">
             <p className="setting-desc">
-              Provide your optional Gemini API key to unlock zero-shot vision OCR and intelligent web URL recipe parsing.
+              Your Gemini API key is used to read photos of recipes and to parse web pages that need it.
             </p>
 
             <div className="input-group">

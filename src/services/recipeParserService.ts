@@ -1,4 +1,3 @@
-import { createWorker } from 'tesseract.js';
 import { Recipe, IngredientSection, IngredientItem, InstructionStep } from '../types/recipe';
 import { convertCupToMetric, parsePureMetricIngredient, convertFahrenheitToCelsiusInText } from './unitConverterService';
 
@@ -99,7 +98,7 @@ function extractInstructionSteps(rawInstructions: any[]): InstructionStep[] {
   });
 }
 
-// Parse structured raw text (from OCR or text paste) into sections and steps
+// Parse structured raw text (from a text paste) into sections and steps
 export function parseRawTextToRecipe(text: string): Partial<Recipe> {
   const lines = text.split('\n').map(l => decodeHtmlEntities(l)).filter(Boolean);
   
@@ -227,32 +226,6 @@ export function parseRawTextToRecipe(text: string): Partial<Recipe> {
     tags: ['Imported'],
     image: 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=1000&q=80'
   };
-}
-
-// Optical Character Recognition (OCR) Photo Parser using Tesseract.js
-export async function parsePhotoToRecipe(
-  imageFile: File | Blob | string,
-  onProgress?: (progress: number, status: string) => void
-): Promise<Partial<Recipe>> {
-  try {
-    if (onProgress) onProgress(10, 'Initializing OCR Engine...');
-
-    const worker = await createWorker('eng');
-    if (onProgress) onProgress(40, 'Scanning & Extracting Text from Image...');
-
-    const ret = await worker.recognize(imageFile);
-    if (onProgress) onProgress(85, 'Analyzing Recipe Parts & Ingredients...');
-
-    const rawText = ret.data.text;
-    await worker.terminate();
-
-    if (onProgress) onProgress(100, 'Parsing Complete!');
-
-    return parseRawTextToRecipe(rawText);
-  } catch (error) {
-    console.error('OCR Parsing Error:', error);
-    throw new Error('Failed to extract text from photo. Please try a clearer image or paste text manually.');
-  }
 }
 
 // Extract Recipe JSON object from HTML string (finds Schema.org JSON-LD or Microdata)
