@@ -2,6 +2,7 @@ import { Recipe } from '../types/recipe';
 import { translateRecipeWithGemini, isGeminiAvailable, classifyGeminiError, GeminiHttpError } from './geminiService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
 import { startLog, updateLog, finishLog, recordLog } from './activityLog';
+import { completeServerImport } from './importQueue';
 import { fetchServerWork, acknowledgePatches, retryServerWork, ServerPatch, ServerWork } from './serverWork';
 import { annotateRecipeVersion, VersionAnnotation } from './annotationService';
 import {
@@ -163,18 +164,22 @@ async function runQueue(): Promise<void> {
 }
 
 const SERVER_POLL_MS = 30_000;
+const SERVER_IMPORT_POLL_MS = 8_000; // a photo import is being read: you are waiting for it
 const SERVER_MAX_POLLS = 120; // an hour; the next app start looks again
 
 // Apply what the worker finished. A result only applies to the recipe it was made for: the fingerprint must
 // still match, so nothing you edited meanwhile is overwritten.
 function applyServerPatches(patches: ServerPatch[]): void {
   if (patches.length === 0) return;
+  // Photo imports add new recipes to storage: do that before the rest loads and saves its copy of the recipes
+  for (const patch of patches) if (patch.kind === 'p') completeServerImport(patch);
   const recipes = getStoredRecipes();
   let changed = false;
 
   for (const patch of patches) {
     const idx = recipes.findIndex((r) => r.id === patch.id);
     const recipe = recipes[idx];
+    if (patch.kind === 'p') continue; // photo imports are saved first, see below
     const logBase = {
       id: `srv-${patch.key}-${patch.endedAt}`,
       recipeId: patch.id,
@@ -230,7 +235,7 @@ async function runServerQueue(first: ServerWork): Promise<void> {
 
     const localWork = computeWorkList(getStoredRecipes());
     if (localWork.length === 0 && info.pending === 0) return; // nothing waits, anywhere
-    await sleep(SERVER_POLL_MS);
+    await sleep(info.imports ? SERVER_IMPORT_POLL_MS : SERVER_POLL_MS);
     info = await fetchServerWork();
   }
 }

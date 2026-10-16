@@ -8,9 +8,11 @@ import {
 import { parseRecipeWithGemini, isGeminiAvailable } from './geminiService';
 import { classifyGeminiError } from '../shared/geminiErrors';
 import { findImageForRecipe } from './imageSearchService';
-import { withPendingTranslation } from './translationService';
+import { withPendingTranslation, startTranslationQueue } from './translationService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
-import { startLog, updateLog, finishLog } from './activityLog';
+import { startLog, updateLog, finishLog, recordLog } from './activityLog';
+import { fetchServerWork, registerServerImport, ServerPatch } from './serverWork';
+import { uploadDataUrl } from './imageService';
 
 // Imports run in the background, one at a time. The import dialog only queues a job;
 // the finished recipe is saved straight away (the translation queue picks it up next).
@@ -27,6 +29,9 @@ export interface ImportJob {
   // payloads: text and url survive a reload; a photo only lives in memory
   url?: string;
   text?: string;
+  // a photo handed to the server: it is read there, also when the app is closed; the recipe arrives as a patch
+  remote?: boolean;
+  imageUrl?: string;
 }
 
 export type ImportEvent =
@@ -43,7 +48,7 @@ const loadJobs = (): ImportJob[] => {
     const jobs: ImportJob[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
     // A running job was cut off by closing the app: run it again. Photos are gone with the page.
     return jobs.map((j) =>
-      j.kind === 'photo' && j.status !== 'failed'
+      j.kind === 'photo' && j.status !== 'failed' && !j.remote
         ? { ...j, status: 'failed' as const, error: 'Interrupted when the app was closed. Add the photo again.' }
         : j.status === 'running'
           ? { ...j, status: 'queued' as const }
@@ -113,8 +118,8 @@ export function enqueueImport(spec: NewJob): ImportJob {
 export function retryImport(id: string): void {
   const job = jobs.find((j) => j.id === id);
   if (!job || job.status !== 'failed') return;
-  if (job.kind === 'photo' && !photoPayloads.has(id)) return; // the photo is gone, add it again
-  patchJob(id, { status: 'queued', error: undefined });
+  if (job.kind === 'photo' && !photoPayloads.has(id) && !job.imageUrl) return; // the photo is gone, add it again
+  patchJob(id, { status: 'queued', error: undefined, remote: undefined });
   startImportQueue();
 }
 
@@ -189,7 +194,86 @@ async function parseJob(job: ImportJob, setMethod: (m: string) => void): Promise
   return { ...parsed, image: photo.dataUrl };
 }
 
+// Photos are read by the server when there is one: it keeps going when the app is closed.
+async function handOffToServer(job: ImportJob): Promise<boolean> {
+  const info = await fetchServerWork();
+  if (!info?.enabled) return false;
+  const photo = photoPayloads.get(job.id);
+  const imageUrl = job.imageUrl || (photo ? await uploadDataUrl(photo.dataUrl) : null);
+  if (!imageUrl) return false;
+  if (!(await registerServerImport(job.id, imageUrl, job.label))) return false;
+  patchJob(job.id, { status: 'running', remote: true, imageUrl, error: undefined });
+  photoPayloads.delete(job.id);
+  // the translation queue's server loop collects the result, now and after a reload
+  startTranslationQueue();
+  return true;
+}
+
+// Build and save the recipe from what was read. Shared by the in-page import and the server's result.
+function saveImportedRecipe(parsed: Partial<Recipe>, id: string, image: string): Recipe {
+  // live: you are waiting for this one, so it is translated and annotated now, not in the background batch
+  const recipe: Recipe = withPendingTranslation({
+    id,
+    title: parsed.title || 'Imported Recipe',
+    description: parsed.description || '',
+    category: parsed.category || 'Main',
+    prepTime: parsed.prepTime || 15,
+    cookTime: parsed.cookTime || 20,
+    servings: parsed.servings || 4,
+    image,
+    sourceUrl: parsed.sourceUrl,
+    ingredientSections: parsed.ingredientSections || [],
+    instructions: parsed.instructions || [],
+    tags: parsed.tags || ['Imported'],
+    isFavorite: false,
+    createdAt: new Date().toISOString(),
+  }, true);
+  saveStoredRecipes([recipe, ...getStoredRecipes()]);
+  return recipe;
+}
+
+/** The server finished (or gave up on) a photo import: save the recipe or report the failure. */
+export function completeServerImport(patch: Extract<ServerPatch, { kind: 'p' }>): void {
+  const job = jobs.find((j) => j.id === patch.id);
+  const logBase = {
+    id: `srv-${patch.key}-${patch.endedAt}`,
+    kind: 'import' as const,
+    label: patch.label || job?.label || 'Photo',
+    method: patch.method || 'AI vision (server)',
+    started: patch.startedAt,
+    ended: patch.endedAt,
+  };
+  const drop = () => {
+    jobs = jobs.filter((j) => j.id !== patch.id);
+    persist();
+  };
+
+  if (patch.gaveUp || !patch.result) {
+    const error = patch.error || 'The server could not read this photo.';
+    recordLog({ ...logBase, status: 'failed', detail: error });
+    if (job) {
+      patchJob(job.id, { status: 'failed', error, remote: undefined });
+      emit({ type: 'failed', job, error });
+    }
+    return;
+  }
+
+  const recipeId = `imp-${patch.id}`;
+  if (getStoredRecipes().some((r) => r.id === recipeId)) return drop(); // already saved (another device or tab)
+  const recipe = saveImportedRecipe(patch.result, recipeId, patch.result.image || '');
+  recordLog({
+    ...logBase,
+    label: recipe.title,
+    recipeId: recipe.id,
+    status: 'done',
+    detail: `${recipe.ingredientSections.flatMap((s) => s.items).length} ingredients, ${recipe.instructions.length} steps (read by the server)`,
+  });
+  drop();
+  if (job) emit({ type: 'done', job, recipe });
+}
+
 async function processJob(job: ImportJob): Promise<void> {
+  if (job.kind === 'photo' && (await handOffToServer(job))) return;
   patchJob(job.id, { status: 'running' });
   emit({ type: 'started', job });
   const logId = startLog('import', job.label);
@@ -201,29 +285,9 @@ async function processJob(job: ImportJob): Promise<void> {
 
   try {
     const parsed = await parseJob(job, setMethod);
-    const category = parsed.category || 'Main';
     const title = parsed.title || 'Imported Recipe';
-    const image = await findImageForRecipe(title, category, parsed.image, parsed.tags || []);
-
-    // live: you are waiting for this one, so it is translated and annotated now, not in the background batch
-    const recipe: Recipe = withPendingTranslation({
-      id: `imported-${Date.now()}`,
-      title,
-      description: parsed.description || '',
-      category,
-      prepTime: parsed.prepTime || 15,
-      cookTime: parsed.cookTime || 20,
-      servings: parsed.servings || 4,
-      image,
-      sourceUrl: parsed.sourceUrl,
-      ingredientSections: parsed.ingredientSections || [],
-      instructions: parsed.instructions || [],
-      tags: parsed.tags || ['Imported'],
-      isFavorite: false,
-      createdAt: new Date().toISOString(),
-    }, true);
-
-    saveStoredRecipes([recipe, ...getStoredRecipes()]);
+    const image = await findImageForRecipe(title, parsed.category || 'Main', parsed.image, parsed.tags || []);
+    const recipe = saveImportedRecipe(parsed, `imported-${Date.now()}`, image);
     finishLog(logId, 'done', { label: title, recipeId: recipe.id, method, detail: `${recipe.ingredientSections.flatMap((s) => s.items).length} ingredients, ${recipe.instructions.length} steps` });
     jobs = jobs.filter((j) => j.id !== job.id);
     photoPayloads.delete(job.id);

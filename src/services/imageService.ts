@@ -68,6 +68,21 @@ export async function uploadRecipeImage(file: File): Promise<string> {
   return blobToDataUrl(blob);
 }
 
+/** Upload a (scan) data URL to the server's image store. Returns its /api/image/... URL, or null when that is not possible. */
+export async function uploadDataUrl(dataUrl: string): Promise<string | null> {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const res = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob });
+    if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+      const body = await res.json();
+      if (typeof body.url === 'string') return body.url;
+    }
+  } catch {
+    // no server behind this page
+  }
+  return null;
+}
+
 /** A photo of a recipe page, shrunk for the AI to read, returned as a data URL. */
 export async function photoToScanDataUrl(file: File): Promise<string> {
   if (!file.type.startsWith('image/')) throw new Error('That file is not an image.');

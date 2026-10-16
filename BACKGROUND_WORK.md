@@ -65,3 +65,13 @@ interactive calls that were running into rate limits.
 - Imports (fetching and parsing a page) and photo OCR still run in the app: they are CPU heavy and OCR only exists in the browser.
   Once an import has finished, its translation and annotation do run on the server.
 - The Gemini key typed into Settings is only used by the app itself, never by the server.
+
+## Photo imports
+
+A photo import is read by the worker, so it keeps going when the app is closed:
+
+1. The app uploads the (already shrunk) photo to `/api/image` and registers it with `POST /api/work/import {id, imageUrl, fileName}`. The worker stores it in the work document (`imports`), no extra KV key.
+2. The cron (or the request itself) reads the photo from KV, asks the AI with direct calls (imports are live work, handled before translations), and leaves the recipe as a patch of kind `p`. Busy or rate limited: it waits and tries again; a refused request is retried 3 times, then given up with the reason.
+3. The app collects the patch (it polls every 8 seconds while imports wait, also after a reload), saves the recipe as `imp-<job id>` (so two devices do not both add it), logs it in the activity log and starts its translation.
+
+Without a server (local dev), or when the upload fails, the app reads the photo itself as before (the import job then only lives while the page is open).
