@@ -83,9 +83,29 @@ export async function verifyGeminiKey(apiKey?: string): Promise<{ ok: boolean; m
       return { ok: !!body.ok, message: body.message || 'Unknown result.' };
     }
     const res = await fetch(`${GEMINI_BASE}/models?pageSize=1`, { headers: { 'x-goog-api-key': apiKey } });
-    if (res.ok) return { ok: true, message: 'Key works.' };
-    const body = await res.json().catch(() => null);
-    return { ok: false, message: body?.error?.message || `Google rejected the key (HTTP ${res.status}).` };
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      return { ok: false, message: body?.error?.message || `Google rejected the key (HTTP ${res.status}).` };
+    }
+    // Listing models proves the key, not that real requests work: try a tiny one on each model
+    const failed: string[] = [];
+    for (const model of [GEMINI_MODEL, GEMINI_MODEL_LIGHT]) {
+      const probe = await fetch(`${GEMINI_BASE}/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'Reply with {"ok":true}' }] }],
+          generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 32 },
+        }),
+      });
+      if (!probe.ok) {
+        const body = await probe.json().catch(() => null);
+        failed.push(`${model}: HTTP ${probe.status}${body?.error?.message ? `, ${String(body.error.message).slice(0, 160)}` : ''}`);
+      }
+    }
+    return failed.length === 0
+      ? { ok: true, message: 'Key works.' }
+      : { ok: false, message: `Key is valid, but a real request failed. ${failed.join(' | ')}` };
   } catch {
     return { ok: false, message: 'Could not reach the server or Google. Check your connection.' };
   }
