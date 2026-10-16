@@ -539,6 +539,9 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
                       <input
                         type="text"
                         placeholder="Unit (g, ml, tbsp)"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
                         value={item.unit}
                         onChange={(e) => handleUpdateIngredient(sec.id, item.id, 'unit', e.target.value)}
                         className="input-field item-unit"
@@ -805,6 +808,27 @@ export const RecipeForm: React.FC<RecipeFormProps> = ({
         .step-text-input {
           flex: 1;
           min-height: 60px;
+        }
+        @media (max-width: 600px) {
+          /* One step per card: number + timer + remove on top, the text full width below (like ingredients) */
+          .step-editor-row {
+            display: grid;
+            grid-template-columns: 32px 1fr 40px;
+            grid-template-areas:
+              'badge timer remove'
+              'text text text';
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+          }
+          .step-editor-row .step-badge { grid-area: badge; margin-top: 0; }
+          .step-editor-row .step-timer-input { grid-area: timer; width: auto; }
+          .step-editor-row .step-timer-input .input-field { min-width: 0; }
+          .step-editor-row > .btn { grid-area: remove; padding: 0.5rem; justify-self: end; }
+          .step-editor-row .step-text-input { grid-area: text; min-height: 110px; font-size: 1rem; width: 100%; }
         }
         .step-timer-input {
           display: flex;
