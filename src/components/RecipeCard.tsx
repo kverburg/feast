@@ -23,7 +23,7 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
     : 0;
 
   return (
-    <div className="card recipe-card card-hover" onClick={() => onSelect(recipe)}>
+    <div className="card recipe-card card-hover" onClick={() => onSelect(originalRecipe)}>
       <div className="card-image-wrapper">
         <img
           src={recipe.image || 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=1000&q=80'}

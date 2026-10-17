@@ -1,3 +1,4 @@
+import { findMention } from '../shared/mentions';
 import { IngredientItem, StepRef } from '../types/recipe';
 import { convertCupToMetric } from './unitConverterService';
 
@@ -158,7 +159,7 @@ export function buildStepSegments(text: string, refs: StepRef[] | undefined, kno
     // first occurrence that does not overlap an earlier one
     let from = 0;
     for (;;) {
-      const start = text.indexOf(ref.mention, from);
+      const start = findMention(text, ref.mention, from);
       if (start === -1) break;
       const end = start + ref.mention.length;
       if (!taken.some(([a, b]) => start < b && end > a)) {

@@ -1,6 +1,7 @@
 // Gemini tasks that run in the app and in the worker. They know nothing about where the request goes:
 // the caller passes `generate`, which sends a request body to Gemini and returns the parsed response
 // (the app goes through its proxy or straight to Google, the worker straight to Google).
+import { findMention } from './mentions';
 import type { Recipe, IngredientSection, InstructionStep, StepRef } from '../types/recipe';
 
 export type GeminiTier = 'default' | 'light';
@@ -167,7 +168,7 @@ export function parseAnnotation(sections: IngredientSection[], steps: Instructio
     for (const r of raw) {
       if (!r || !itemIds.has(r.id) || seen.has(r.id)) continue;
       const mention = String(r.mention || '');
-      if (!mention || !step.text.includes(mention)) continue; // not verbatim: drop it
+      if (!mention || findMention(step.text, mention) === -1) continue; // not verbatim, or only inside a longer word: drop it
       const fraction = typeof r.fraction === 'number' && r.fraction > 0 && r.fraction <= 1 ? r.fraction : 1;
       seen.add(r.id);
       valid.push({ ingredientId: r.id, mention, fraction });

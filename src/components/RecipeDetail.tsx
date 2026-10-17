@@ -1,9 +1,9 @@
 import { localizeRecipe, Language } from '../services/localizeRecipe';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Recipe, IngredientItem } from '../types/recipe';
 import { convertUnit, displayName, formatAmount, formatUnit } from '../services/amounts';
 import { StepText } from './StepText';
-import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, Timer, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
+import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, Timer, Pause, RotateCcw, X, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
 
 interface RecipeDetailProps {
   recipe: Recipe;
@@ -36,7 +36,42 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   const [currentServings, setCurrentServings] = useState<number>(recipe.servings || 4);
   const [unitSystem, setUnitSystem] = useState<'metric' | 'imperial'>('metric');
   const [checkedSteps, setCheckedSteps] = useState<Record<string, boolean>>({});
-  const [activeTimer, setActiveTimer] = useState<{ stepId: string; secondsLeft: number } | null>(null);
+  // One step timer at a time. It counts down to a moment in time (not ticks), so it stays right when the tab sleeps.
+  const [activeTimer, setActiveTimer] = useState<{ stepId: string; stepNumber: number; total: number; endsAt: number; pausedLeft?: number } | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const timerLeft = !activeTimer ? 0 : activeTimer.pausedLeft !== undefined ? activeTimer.pausedLeft : Math.max(0, Math.ceil((activeTimer.endsAt - now) / 1000));
+  const timerRunning = !!activeTimer && activeTimer.pausedLeft === undefined && timerLeft > 0;
+  const timerDone = !!activeTimer && activeTimer.pausedLeft === undefined && timerLeft === 0;
+
+  useEffect(() => {
+    if (!timerRunning) return;
+    const id = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [timerRunning]);
+
+  useEffect(() => {
+    if (!timerDone) return;
+    // Time is up: a short beep and a buzz, and the bar turns into "done" until it is dismissed
+    try {
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new Ctx();
+      [0, 0.35, 0.7].forEach((delay) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = 880;
+        gain.gain.value = 0.15;
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(ctx.currentTime + delay);
+        osc.stop(ctx.currentTime + delay + 0.2);
+      });
+    } catch {
+      // no audio available
+    }
+    navigator.vibrate?.([300, 150, 300, 150, 300]);
+  }, [timerDone]);
+
+  // A timer belongs to the recipe that is open
+  useEffect(() => setActiveTimer(null), [recipe.id]);
 
   const scaleRatio = currentServings / (recipe.servings || 1);
   const allItems: IngredientItem[] = (displaySections || []).flatMap((sec) => sec.items);
@@ -46,9 +81,24 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
     setCheckedSteps(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const handleStartTimer = (stepId: string, minutes: number) => {
-    setActiveTimer({ stepId, secondsLeft: minutes * 60 });
+  const handleStartTimer = (stepId: string, stepNumber: number, minutes: number) => {
+    setNow(Date.now());
+    setActiveTimer({ stepId, stepNumber, total: minutes * 60, endsAt: Date.now() + minutes * 60000 });
   };
+
+  const pauseOrResumeTimer = () =>
+    setActiveTimer((t) => {
+      if (!t) return t;
+      if (t.pausedLeft === undefined) return { ...t, pausedLeft: Math.max(0, Math.ceil((t.endsAt - Date.now()) / 1000)) };
+      return { ...t, endsAt: Date.now() + t.pausedLeft * 1000, pausedLeft: undefined };
+    });
+
+  const restartTimer = () => {
+    setNow(Date.now());
+    setActiveTimer((t) => (t ? { ...t, endsAt: Date.now() + t.total * 1000, pausedLeft: undefined } : t));
+  };
+
+  const formatClock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
   const handleAddAllToShopping = () => {
     const itemsToAdd: any[] = [];
@@ -287,11 +337,14 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                       <div className="step-timer-row">
                         <button
                           className="btn btn-outline btn-sm timer-btn"
-                          onClick={() => handleStartTimer(step.id, step.timerMinutes!)}
+                          onClick={() => handleStartTimer(step.id, step.stepNumber, step.timerMinutes!)}
                         >
                           <Timer size={15} />
-                          <span>Start {step.timerMinutes} min Timer</span>
+                          <span>{activeTimer?.stepId === step.id ? `Restart ${step.timerMinutes} min timer` : `Start ${step.timerMinutes} min timer`}</span>
                         </button>
+                        {activeTimer?.stepId === step.id && (
+                          <span className={`step-timer-clock ${timerDone ? 'done' : ''}`}>{timerDone ? 'Time is up!' : formatClock(timerLeft)}</span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -303,7 +356,31 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         </div>
       </div>
 
+      {activeTimer && (
+        <div className={`timer-bar ${timerDone ? 'done' : ''}`} role="timer" aria-live={timerDone ? 'assertive' : 'off'}>
+          <Timer size={18} />
+          <span className="timer-bar-label">Step {activeTimer.stepNumber}</span>
+          <span className="timer-bar-clock">{timerDone ? 'Time is up!' : formatClock(timerLeft)}</span>
+          {!timerDone && (
+            <button type="button" className="timer-bar-btn" onClick={pauseOrResumeTimer} aria-label={activeTimer.pausedLeft !== undefined ? 'Resume' : 'Pause'}>
+              {activeTimer.pausedLeft !== undefined ? <Play size={16} /> : <Pause size={16} />}
+            </button>
+          )}
+          <button type="button" className="timer-bar-btn" onClick={restartTimer} aria-label="Restart"><RotateCcw size={16} /></button>
+          <button type="button" className="timer-bar-btn" onClick={() => setActiveTimer(null)} aria-label="Stop timer"><X size={16} /></button>
+        </div>
+      )}
+
       <style>{`
+        .step-timer-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+        .step-timer-clock { font-family: var(--font-heading); font-weight: 700; font-size: 1.1rem; color: var(--accent-primary); font-variant-numeric: tabular-nums; }
+        .step-timer-clock.done { color: #ef4444; }
+        .timer-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 5.5rem; z-index: 60; display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.9rem; background: var(--accent-primary); color: #fff; border-radius: var(--radius-full); box-shadow: 0 6px 24px rgba(0,0,0,0.25); max-width: calc(100vw - 2rem); }
+        .timer-bar.done { background: #ef4444; animation: timer-pulse 0.8s ease-in-out infinite; }
+        .timer-bar-label { font-size: 0.85rem; opacity: 0.9; }
+        .timer-bar-clock { font-family: var(--font-heading); font-weight: 800; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+        .timer-bar-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; border: none; background: rgba(255,255,255,0.2); color: #fff; cursor: pointer; }
+        @keyframes timer-pulse { 50% { transform: translateX(-50%) scale(1.05); } }
         .recipe-detail-container {
           display: flex;
           flex-direction: column;
