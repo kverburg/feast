@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { CalendarDays, UtensilsCrossed, Plus, Minus, X, ShoppingBag, Search, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
+import { AlertTriangle, CalendarDays, UtensilsCrossed, Plus, Minus, X, ShoppingBag, Search, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
 import { Recipe, ShoppingItem } from '../types/recipe';
 import { recipeMatchesQuery } from '../services/search';
 import { usePeople, addPerson } from '../services/peopleService';
+import { Conflict, conflictKey, describeConflict, mealConflicts, recipeConflicts } from '../services/dietService';
+import { showToast } from '../services/toast';
 import { Meal, combineIngredients, toShoppingItems } from '../services/mealService';
 
 interface MealsProps {
@@ -58,7 +60,21 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
     if (confirm(`Delete "${meal.name}" permanently?`)) onUpdateMeals(meals.filter((m) => m.id !== meal.id));
   };
 
+  // Tell right away when a change to a meal brings in an ingredient somebody cannot or does not want to eat
+  const warnAboutNewConflicts = (before: Meal, after: Meal) => {
+    const known = new Set(mealConflicts(before, recipes, people).map(conflictKey));
+    const added = mealConflicts(after, recipes, people).filter((c) => !known.has(conflictKey(c)));
+    if (added.length === 0) return;
+    showToast({
+      kind: 'error',
+      message: `Watch out: ${added.slice(0, 2).map(describeConflict).join('; ')}${added.length > 2 ? ` (+${added.length - 2} more)` : ''}`,
+      duration: 15000,
+    });
+  };
+
   const addRecipe = (mealId: string, recipe: Recipe) => {
+    const before = meals.find((m) => m.id === mealId);
+    if (before) warnAboutNewConflicts(before, { ...before, recipes: [...before.recipes, { recipeId: recipe.id, servings: recipe.servings || 1 }] });
     updateMeal(mealId, (m) => ({
       ...m,
       recipes: [...m.recipes, { recipeId: recipe.id, servings: recipe.servings || 1 }],
@@ -84,8 +100,14 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
       return next;
     });
 
-  const addAttendee = (mealId: string, personId: string) =>
+  const addAttendee = (mealId: string, personId: string) => {
+    const before = meals.find((m) => m.id === mealId);
+    if (before) {
+      const after = { ...before, attendeeIds: [...new Set([...(before.attendeeIds || []), personId])] };
+      warnAboutNewConflicts(before, after);
+    }
     updateMeal(mealId, (m) => ({ ...m, attendeeIds: [...new Set([...(m.attendeeIds || []), personId])] }));
+  };
 
   const removeAttendee = (mealId: string, personId: string) =>
     updateMeal(mealId, (m) => ({ ...m, attendeeIds: (m.attendeeIds || []).filter((id) => id !== personId) }));
@@ -96,6 +118,13 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
     if (person) addAttendee(mealId, person.id);
     setNewPersonName('');
     setNewPersonFor(null);
+  };
+
+  // In the picker: which recipes clash with the people at the meal that is being filled
+  const pickerWarnings = (recipe: Recipe): Conflict[] => {
+    const meal = meals.find((m) => m.id === pickerMealId);
+    const attendees = people.filter((p) => (meal?.attendeeIds || []).includes(p.id));
+    return attendees.length > 0 ? recipeConflicts(recipe, attendees) : [];
   };
 
   const pickerRecipes = recipes.filter((r) => recipeMatchesQuery(r, pickerSearch));
@@ -245,6 +274,23 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
                 </div>
               </div>
 
+              {(() => {
+                const conflicts = mealConflicts(meal, recipes, people);
+                if (conflicts.length === 0) return null;
+                return (
+                  <div className="meals-warnings" role="alert">
+                    {conflicts
+                      .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'allergy' ? -1 : 1))
+                      .map((c: Conflict) => (
+                        <div key={conflictKey(c)} className={`meals-warning ${c.kind}`}>
+                          <AlertTriangle size={14} />
+                          <span>{describeConflict(c)}</span>
+                        </div>
+                      ))}
+                  </div>
+                );
+              })()}
+
               {meal.recipes.length === 0 && <p className="meals-empty">No recipes in this meal yet.</p>}
               {meal.recipes.map((entry, index) => {
                 const recipe = recipeById.get(entry.recipeId);
@@ -342,6 +388,9 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
                   <button onClick={() => addRecipe(pickerMealId, r)}>
                     <span>{r.title}</span>
                     <small>{r.servings} servings · {r.category}</small>
+                    {pickerWarnings(r).map((c) => (
+                      <small key={conflictKey(c)} className={`meals-picker-warn ${c.kind}`}>⚠ {c.person.name}: {c.kind === 'allergy' ? 'allergic to' : 'dislikes'} {c.term} ({c.ingredient})</small>
+                    ))}
                   </button>
                 </li>
               ))}
@@ -356,6 +405,14 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
         .meals-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1.25rem; }
         .meals-title-box { display: flex; align-items: center; gap: 1rem; }
         .meals-icon { width: 48px; height: 48px; border-radius: 14px; background: var(--accent-gradient); display: flex; align-items: center; justify-content: center; }
+        .meals-warnings { display: flex; flex-direction: column; gap: 0.3rem; }
+        .meals-warning { display: flex; align-items: flex-start; gap: 0.4rem; padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 600; }
+        .meals-warning svg { flex-shrink: 0; margin-top: 2px; }
+        .meals-warning.allergy { background: rgba(239, 68, 68, 0.14); color: #dc2626; }
+        .meals-warning.dislike { background: rgba(245, 158, 11, 0.18); color: #b45309; }
+        .meals-picker-warn { font-size: 0.75rem; font-weight: 600; }
+        .meals-picker-warn.allergy { color: #dc2626; }
+        .meals-picker-warn.dislike { color: #b45309; }
         .meals-details { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; }
         .meals-date { display: flex; align-items: center; gap: 0.4rem; color: var(--text-muted); }
         .meals-date .input-field { width: auto; padding: 0.35rem 0.5rem; }

@@ -7,6 +7,8 @@ const CHANGE_EVENT = 'feast-people-changed';
 export interface Person {
   id: string;
   name: string;
+  allergies?: string[]; // ingredients this person must not eat
+  dislikes?: string[]; // ingredients this person does not like
 }
 
 export const getPeople = (): Person[] => {
@@ -45,6 +47,9 @@ export const renamePerson = (id: string, name: string): void => {
   if (!trimmed) return;
   savePeople(getPeople().map((p) => (p.id === id ? { ...p, name: trimmed } : p)));
 };
+
+export const updatePerson = (id: string, patch: Partial<Omit<Person, 'id'>>): void =>
+  savePeople(getPeople().map((p) => (p.id === id ? { ...p, ...patch } : p)));
 
 // Meals that still list a removed person simply ignore the unknown id.
 export const deletePerson = (id: string): void => savePeople(getPeople().filter((p) => p.id !== id));
