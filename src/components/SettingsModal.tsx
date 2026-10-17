@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { getStoredApiKey, saveStoredApiKey } from '../services/storageService';
 import { verifyGeminiKey, getGeminiStatus } from '../services/geminiService';
 import { startTranslationQueue } from '../services/translationService';
-import { usePeople, addPerson, renamePerson, deletePerson } from '../services/peopleService';
+import { usePeople } from '../services/peopleService';
 import { startLog, finishLog } from '../services/activityLog';
 import { showToast } from '../services/toast';
-import { Activity, Gauge, Plus, Trash2, Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
+import { Activity, Gauge, Users, Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
 import { Recipe } from '../types/recipe';
 import { parseCookmateXml } from '../services/cookmateImportService';
 
@@ -18,6 +18,7 @@ interface SettingsModalProps {
   voiceEnabled: boolean;
   onToggleVoice: (enabled: boolean) => void;
   onOpenBenchmark: () => void;
+  onOpenPeople: () => void;
   onOpenActivityLog: () => void;
 }
 
@@ -25,6 +26,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   recipes,
   onOpenActivityLog,
   onOpenBenchmark,
+  onOpenPeople,
   onImportBackup,
   onResetSeed,
   theme,
@@ -43,7 +45,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [verifyResult, setVerifyResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const people = usePeople();
-  const [newPerson, setNewPerson] = useState('');
 
   const handleVerifyKey = async () => {
     setVerifying(true);
@@ -292,46 +293,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         <div className="settings-card card">
-          <span className="setting-name">People</span>
-          <p className="setting-desc">Who can be at a meal. Pick them per meal in Meals.</p>
-          <div className="people-list">
-            {people.map((p) => (
-              <div key={p.id} className="people-row">
-                <input
-                  className="input-field"
-                  defaultValue={p.name}
-                  aria-label="Name"
-                  onBlur={(e) => {
-                    if (e.target.value.trim()) renamePerson(p.id, e.target.value);
-                    else e.target.value = p.name;
-                  }}
-                />
-                <button
-                  className="btn btn-outline btn-icon danger"
-                  aria-label={`Remove ${p.name}`}
-                  onClick={() => {
-                    if (confirm(`Remove ${p.name}? They are taken off the meals they were at.`)) deletePerson(p.id);
-                  }}
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            ))}
-            {people.length === 0 && <p className="setting-desc">Nobody yet.</p>}
-          </div>
-          <form
-            className="people-add"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (addPerson(newPerson)) setNewPerson('');
-            }}
-          >
-            <input className="input-field" placeholder="Add a person" value={newPerson} onChange={(e) => setNewPerson(e.target.value)} />
-            <button type="submit" className="btn btn-secondary btn-sm" disabled={!newPerson.trim()}>
-              <Plus size={16} />
-              <span>Add</span>
+          <div className="setting-row">
+            <div>
+              <span className="setting-name">People</span>
+              <p className="setting-desc">
+                Who can be at a meal, and what they are allergic to or do not like.
+                {people.length > 0 ? ` ${people.length} ${people.length === 1 ? 'person' : 'people'}.` : ''}
+              </p>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={onOpenPeople}>
+              <Users size={16} />
+              <span>Manage people</span>
             </button>
-          </form>
+          </div>
         </div>
 
         <div className="settings-card card">
@@ -364,8 +338,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </div>
 
       <style>{`
-        .people-list { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.75rem 0; }
-        .people-row, .people-add { display: flex; gap: 0.5rem; align-items: center; }
         .key-actions {
           display: flex;
           align-items: center;

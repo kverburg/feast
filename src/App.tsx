@@ -28,6 +28,7 @@ import { ErrorBanner } from './components/ErrorBanner';
 import { Toasts } from './components/Toasts';
 import { ActivityLog } from './components/ActivityLog';
 import { BenchmarkResults } from './components/BenchmarkResults';
+import { PeopleSettings } from './components/PeopleSettings';
 import { showToast } from './services/toast';
 import { getImportJobs, startImportQueue, subscribeImportEvents, subscribeImportJobs } from './services/importQueue';
 import { pullActivity } from './services/activityLog';
@@ -42,7 +43,7 @@ export function App() {
   const [importCounts, setImportCounts] = useState({ busy: 0, failed: 0 });
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [currentTab, setCurrentTab] = useState<'recipes' | 'meals' | 'shopping' | 'settings'>('recipes');
-  const [settingsSub, setSettingsSub] = useState<'activity' | 'benchmark' | null>(null); // sub page of Settings
+  const [settingsSub, setSettingsSub] = useState<'activity' | 'benchmark' | 'people' | null>(null); // sub page of Settings
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals & Overlay States
@@ -66,7 +67,7 @@ export function App() {
     tab: Tab;
     recipeId: string | null;
     modal: 'form' | 'import' | 'cook' | null;
-    sub: 'activity' | 'benchmark' | null;
+    sub: 'activity' | 'benchmark' | 'people' | null;
   }
   interface HistoryEntry {
     nav: NavState;
@@ -158,7 +159,7 @@ export function App() {
     // Opened on a deep link (#/recipe/<id> or #/meals ...): the list stays one Back away
     const hash = initialHashRef.current;
     const recipeMatch = hash.match(/^#\/recipe\/(.+)$/);
-    const tabMatch = hash.match(/^#\/(meals|shopping|settings(?:\/(?:activity|benchmark))?)$/);
+    const tabMatch = hash.match(/^#\/(meals|shopping|settings(?:\/(?:activity|benchmark|people))?)$/);
     const deepRecipe = recipeMatch ? loadedRecipes.find((r) => r.id === decodeURIComponent(recipeMatch[1])) : undefined;
     if ((deepRecipe || tabMatch) && !deepLinkHandledRef.current) {
       deepLinkHandledRef.current = true;
@@ -169,7 +170,7 @@ export function App() {
             tab: tabMatch![1].split('/')[0] as Tab,
             recipeId: null,
             modal: null,
-            sub: tabMatch![1].endsWith('/activity') ? 'activity' : tabMatch![1].endsWith('/benchmark') ? 'benchmark' : null,
+            sub: tabMatch![1].endsWith('/activity') ? 'activity' : tabMatch![1].endsWith('/benchmark') ? 'benchmark' : tabMatch![1].endsWith('/people') ? 'people' : null,
           };
       window.history.replaceState({ nav: listNav, idx: 0, prevKey: null } as HistoryEntry, '', '#/');
       window.history.pushState({ nav: target, idx: 1, prevKey: JSON.stringify(listNav) } as HistoryEntry, '', hashFor(target));
@@ -437,10 +438,13 @@ export function App() {
           <BenchmarkResults onBack={() => setSettingsSub(null)} />
         )}
 
+        {currentTab === 'settings' && settingsSub === 'people' && <PeopleSettings onBack={() => setSettingsSub(null)} />}
+
         {currentTab === 'settings' && settingsSub === null && (
           <SettingsModal
             onOpenActivityLog={() => setSettingsSub('activity')}
             onOpenBenchmark={() => setSettingsSub('benchmark')}
+            onOpenPeople={() => setSettingsSub('people')}
             recipes={recipes}
             onImportBackup={(newRecipes) => {
               setRecipes(newRecipes);
