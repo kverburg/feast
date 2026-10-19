@@ -12,11 +12,12 @@ interface MealsProps {
   meals: Meal[];
   onUpdateMeals: (meals: Meal[]) => void;
   onAddToShoppingList: (items: ShoppingItem[]) => void;
+  onOpenRecipe: (recipe: Recipe) => void;
 }
 
 const formatAmount = (n: number): string => String(Math.round(n * 100) / 100);
 
-export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onAddToShoppingList }) => {
+export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onAddToShoppingList, onOpenRecipe }) => {
   const [view, setView] = useState<'active' | 'archived'>('active');
   const [newName, setNewName] = useState('');
   const [pickerMealId, setPickerMealId] = useState<string | null>(null);
@@ -296,7 +297,13 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
                 const recipe = recipeById.get(entry.recipeId);
                 return (
                   <div key={`${entry.recipeId}-${index}`} className="meals-entry">
-                    <span className="meals-entry-title">{recipe ? recipe.title : 'Deleted recipe'}</span>
+                    {recipe ? (
+                      <button type="button" className="meals-entry-title meals-entry-link" title="Open this recipe" onClick={() => onOpenRecipe(recipe)}>
+                        {recipe.title}
+                      </button>
+                    ) : (
+                      <span className="meals-entry-title">Deleted recipe</span>
+                    )}
                     <div className="meals-entry-controls">
                       <button className="meals-mini-btn" onClick={() => changeServings(meal.id, index, -1)} aria-label="Fewer servings">
                         <Minus size={12} />
@@ -432,6 +439,9 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
         .meals-name-input:hover, .meals-name-input:focus { border-color: var(--border-color); outline: none; background: var(--bg-input); }
         .meals-meal-actions { display: flex; gap: 0.4rem; }
         .meals-entry { background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.5rem 0.6rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+        .meals-entry-link { background: none; border: none; padding: 0; text-align: left; cursor: pointer; font-family: inherit; }
+        .meals-entry-link:hover { color: var(--accent-primary); text-decoration: underline; }
+        .meals-entry-link:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; border-radius: 2px; }
         .meals-entry-title { font-size: 0.9rem; font-weight: 600; color: var(--text-main); }
         .meals-entry-controls { display: flex; align-items: center; gap: 0.4rem; }
         .meals-servings { font-size: 0.8rem; color: var(--text-muted); min-width: 2rem; text-align: center; }

@@ -408,6 +408,10 @@ export function App() {
             meals={meals}
             onUpdateMeals={handleUpdateMeals}
             onAddToShoppingList={handleAddItemsToShoppingList}
+            onOpenRecipe={(recipe) => {
+              setCurrentTab('recipes');
+              setSelectedRecipe(recipe);
+            }}
           />
         )}
 
