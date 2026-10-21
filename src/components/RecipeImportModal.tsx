@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { enqueueImport } from '../services/importQueue';
 import { photoToScanDataUrl } from '../services/imageService';
 import { showToast } from '../services/toast';
@@ -14,6 +14,7 @@ interface RecipeImportModalProps {
 export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({ onManualAdd, onClose }) => {
   const [activeTab, setActiveTab] = useState<'url' | 'paste' | 'photo' | 'manual'>('url');
   const [urlInput, setUrlInput] = useState('');
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [pasteInput, setPasteInput] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -203,6 +204,17 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({ onManualAd
                   </label>
                 )}
               </div>
+
+              {!imagePreview && (
+                <>
+                  {/* capture asks phones to open the camera straight away */}
+                  <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} hidden />
+                  <button type="button" className="btn btn-secondary w-full" onClick={() => cameraInputRef.current?.click()}>
+                    <Camera size={18} />
+                    <span>Take a photo with the camera</span>
+                  </button>
+                </>
+              )}
 
               <button
                 type="button"
