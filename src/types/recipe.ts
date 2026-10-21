@@ -41,6 +41,7 @@ export interface Recipe {
   servings: number; // Base portions count (e.g. 4 portions)
   image: string;
   sourceUrl?: string;
+  sourceImage?: string; // the photo this recipe was read from (photo imports), kept as the source
   sourceName?: string;
   ingredientSections: IngredientSection[];
   instructions: InstructionStep[];
