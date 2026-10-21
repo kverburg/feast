@@ -183,8 +183,8 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({ onManualAd
             <div className="tab-content">
               <p className="tab-hint">Upload a photo or screenshot of a cookbook page or recipe card. The AI reads it, which can take a minute.</p>
 
-              <div className="file-dropzone card">
-                {imagePreview ? (
+              {imagePreview ? (
+                <div className="file-dropzone card">
                   <div className="image-preview-container">
                     <img src={imagePreview} alt="Recipe Preview" className="uploaded-preview" />
                     <button
@@ -195,25 +195,23 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({ onManualAd
                       Change Photo
                     </button>
                   </div>
-                ) : (
-                  <label className="dropzone-label">
-                    <Upload size={40} color="var(--accent-primary)" />
-                    <span className="dropzone-title">Click or Drop Photo Here</span>
-                    <span className="dropzone-sub">Supports JPG, PNG, WEBP</span>
+                </div>
+              ) : (
+                <div className="photo-choices">
+                  <label className="file-dropzone card photo-choice">
+                    <Upload size={36} color="var(--accent-primary)" />
+                    <span className="dropzone-title">Upload a photo</span>
+                    <span className="dropzone-sub">Click or drop here</span>
                     <input type="file" accept="image/*" onChange={handleFileChange} className="file-input-hidden" />
                   </label>
-                )}
-              </div>
-
-              {!imagePreview && (
-                <>
                   {/* capture asks phones to open the camera straight away */}
                   <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} hidden />
-                  <button type="button" className="btn btn-secondary w-full" onClick={() => cameraInputRef.current?.click()}>
-                    <Camera size={18} />
-                    <span>Take a photo with the camera</span>
+                  <button type="button" className="file-dropzone card photo-choice" onClick={() => cameraInputRef.current?.click()}>
+                    <Camera size={36} color="var(--accent-primary)" />
+                    <span className="dropzone-title">Take a photo</span>
+                    <span className="dropzone-sub">Use the camera</span>
                   </button>
-                </>
+                </div>
               )}
 
               <button
@@ -313,6 +311,9 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({ onManualAd
           cursor: pointer;
           position: relative;
         }
+        .photo-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+        .photo-choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4rem; min-height: 150px; padding: 1.25rem 0.75rem; font: inherit; color: inherit; background: var(--bg-card); }
+        .photo-choice:hover { border-color: var(--accent-primary); }
         .file-input-hidden {
           position: absolute;
           inset: 0;
