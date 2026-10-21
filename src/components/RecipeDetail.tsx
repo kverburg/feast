@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react';
 import { Recipe, IngredientItem } from '../types/recipe';
 import { convertUnit, displayName, formatAmount, formatUnit } from '../services/amounts';
 import { StepText } from './StepText';
+import { Meal, formatMealDate, mealsWithRecipe } from '../services/mealService';
+import { usePeople } from '../services/peopleService';
 import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, Timer, Pause, RotateCcw, X, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
 
 interface RecipeDetailProps {
@@ -14,6 +16,8 @@ interface RecipeDetailProps {
   onToggleFavorite: (id: string, e: React.MouseEvent) => void;
   onStartCookMode: (recipe: Recipe, targetServings: number) => void;
   onAddToShoppingList: (items: any[]) => void;
+  meals: Meal[];
+  onOpenMeals: () => void;
 }
 
 export const RecipeDetail: React.FC<RecipeDetailProps> = ({
@@ -25,7 +29,11 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   onToggleFavorite,
   onStartCookMode,
   onAddToShoppingList,
+  meals,
+  onOpenMeals,
 }) => {
+  const people = usePeople();
+  const recipeMeals = mealsWithRecipe(meals, recipe.id);
   // Displayed fields based on selected language
   const displayTitle = language === 'en' && recipe.titleEn ? recipe.titleEn : recipe.title;
   const displayDescription = language === 'en' && recipe.descriptionEn ? recipe.descriptionEn : recipe.description;
@@ -356,6 +364,22 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         </div>
       </div>
 
+      {recipeMeals.length > 0 && (
+        <div className="recipe-meals card">
+          <h3>{language === 'nl' ? 'Maaltijden met dit recept' : 'Meals with this recipe'}</h3>
+          {recipeMeals.map((m) => {
+            const names = (m.attendeeIds || []).map((id) => people.find((p) => p.id === id)?.name).filter(Boolean) as string[];
+            return (
+              <button type="button" key={m.id} className="recipe-meal" onClick={onOpenMeals} title="Open Meals">
+                <span className="recipe-meal-name">{m.name}{m.archived ? ' (archived)' : ''}</span>
+                {formatMealDate(m) && <span className="recipe-meal-date">{formatMealDate(m)}</span>}
+                <span className="recipe-meal-people">{names.length > 0 ? names.join(', ') : language === 'nl' ? 'Geen gasten ingevuld' : 'No attendees listed'}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {activeTimer && (
         <div className={`timer-bar ${timerDone ? 'done' : ''}`} role="timer" aria-live={timerDone ? 'assertive' : 'off'}>
           <Timer size={18} />
@@ -372,6 +396,13 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
       )}
 
       <style>{`
+        .recipe-meals { padding: 1.25rem 1.5rem; margin-top: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
+        .recipe-meals h3 { margin: 0 0 0.25rem; }
+        .recipe-meal { display: flex; flex-wrap: wrap; gap: 0.1rem 0.75rem; align-items: baseline; text-align: left; width: 100%; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.55rem 0.8rem; color: var(--text-main); cursor: pointer; font: inherit; }
+        .recipe-meal:hover { border-color: var(--accent-primary); }
+        .recipe-meal-name { font-weight: 700; }
+        .recipe-meal-date { color: var(--text-muted); font-size: 0.85rem; }
+        .recipe-meal-people { flex-basis: 100%; color: var(--text-muted); font-size: 0.85rem; }
         .step-timer-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
         .step-timer-clock { font-family: var(--font-heading); font-weight: 700; font-size: 1.1rem; color: var(--accent-primary); font-variant-numeric: tabular-nums; }
         .step-timer-clock.done { color: #ef4444; }

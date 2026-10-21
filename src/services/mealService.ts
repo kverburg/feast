@@ -26,6 +26,21 @@ export interface CombinedIngredient {
   recipes: string[];
 }
 
+// When a meal happened: its date, else the day it was created
+const mealTime = (m: Meal): number => Date.parse(m.date || m.createdAt) || 0;
+const newestFirst = (a: Meal, b: Meal) => mealTime(b) - mealTime(a);
+
+/** The meals a person was at, newest first. */
+export const mealsOfPerson = (meals: Meal[], personId: string): Meal[] =>
+  meals.filter((m) => (m.attendeeIds || []).includes(personId)).sort(newestFirst);
+
+/** The meals a recipe was part of, newest first. */
+export const mealsWithRecipe = (meals: Meal[], recipeId: string): Meal[] =>
+  meals.filter((m) => m.recipes.some((r) => r.recipeId === recipeId)).sort(newestFirst);
+
+export const formatMealDate = (m: Meal): string =>
+  m.date ? new Date(m.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
 export const getStoredMeals = (): Meal[] => {
   try {
     const data = localStorage.getItem(STORAGE_KEY_MEALS);

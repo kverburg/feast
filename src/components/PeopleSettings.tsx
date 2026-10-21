@@ -1,9 +1,14 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Plus, Trash2, Users, X } from 'lucide-react';
+import { Meal, formatMealDate, mealsOfPerson } from '../services/mealService';
+import { Recipe } from '../types/recipe';
 import { usePeople, addPerson, renamePerson, updatePerson, deletePerson, Person } from '../services/peopleService';
 
 interface Props {
   onBack: () => void;
+  meals: Meal[];
+  recipes: Recipe[];
+  onOpenMeals: () => void;
 }
 
 // A list of terms (ingredients) as chips with an input to add more
@@ -53,7 +58,28 @@ const TermList: React.FC<{ label: string; hint: string; terms: string[]; tone: '
   );
 };
 
-export const PeopleSettings: React.FC<Props> = ({ onBack }) => {
+// The meals this person was at, newest first
+const PersonMeals: React.FC<{ meals: Meal[]; recipes: Recipe[]; onOpenMeals: () => void }> = ({ meals, recipes, onOpenMeals }) => {
+  const [open, setOpen] = useState(false);
+  const title = (id: string) => recipes.find((r) => r.id === id)?.title;
+  return (
+    <div className="people-terms">
+      <button type="button" className="people-meals-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
+        Meals attended ({meals.length}) {meals.length > 0 ? (open ? '▾' : '▸') : ''}
+      </button>
+      {open &&
+        meals.map((m) => (
+          <button type="button" key={m.id} className="people-meal" onClick={onOpenMeals} title="Open Meals">
+            <span className="people-meal-name">{m.name}{m.archived ? ' (archived)' : ''}</span>
+            {formatMealDate(m) && <span className="people-meal-date">{formatMealDate(m)}</span>}
+            <span className="people-meal-recipes">{m.recipes.map((r) => title(r.recipeId) || 'Deleted recipe').join(', ') || 'No recipes'}</span>
+          </button>
+        ))}
+    </div>
+  );
+};
+
+export const PeopleSettings: React.FC<Props> = ({ onBack, meals, recipes, onOpenMeals }) => {
   const people = usePeople();
   const [newName, setNewName] = useState('');
 
@@ -102,6 +128,7 @@ export const PeopleSettings: React.FC<Props> = ({ onBack }) => {
             terms={p.dislikes || []}
             onChange={(dislikes) => updatePerson(p.id, { dislikes })}
           />
+          <PersonMeals meals={mealsOfPerson(meals, p.id)} recipes={recipes} onOpenMeals={onOpenMeals} />
         </div>
       ))}
       {people.length === 0 && <p className="setting-desc">Nobody yet.</p>}
@@ -135,6 +162,12 @@ export const PeopleSettings: React.FC<Props> = ({ onBack }) => {
         .people-chip.allergy { background: rgba(239, 68, 68, 0.14); color: #dc2626; }
         .people-chip.dislike { background: rgba(245, 158, 11, 0.18); color: #b45309; }
         .people-chip button { background: none; border: none; color: inherit; display: flex; padding: 0; cursor: pointer; }
+        .people-meals-toggle { background: none; border: none; padding: 0; text-align: left; cursor: pointer; font: inherit; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+        .people-meal { display: flex; flex-wrap: wrap; gap: 0.1rem 0.6rem; align-items: baseline; text-align: left; width: 100%; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.45rem 0.7rem; color: var(--text-main); cursor: pointer; font: inherit; }
+        .people-meal:hover { border-color: var(--accent-primary); }
+        .people-meal-name { font-weight: 700; }
+        .people-meal-date { color: var(--text-muted); font-size: 0.85rem; }
+        .people-meal-recipes { flex-basis: 100%; color: var(--text-muted); font-size: 0.85rem; }
         .people-term-input { width: 170px; padding: 0.3rem 0.5rem; font-size: 0.85rem; }
       `}</style>
     </div>

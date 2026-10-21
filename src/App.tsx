@@ -389,6 +389,8 @@ export function App() {
               onToggleFavorite={handleToggleFavorite}
               onStartCookMode={(rec, srv) => setCookModeState({ recipe: rec, servings: srv })}
               onAddToShoppingList={handleAddItemsToShoppingList}
+              meals={meals}
+              onOpenMeals={() => setCurrentTab('meals')}
             />
           ) : (
             <RecipeList
@@ -442,7 +444,15 @@ export function App() {
           <BenchmarkResults onBack={() => setSettingsSub(null)} />
         )}
 
-        {currentTab === 'settings' && settingsSub === 'people' && <PeopleSettings onBack={() => setSettingsSub(null)} />}
+        {currentTab === 'settings' && settingsSub === 'people' && <PeopleSettings
+            onBack={() => setSettingsSub(null)}
+            meals={meals}
+            recipes={recipes}
+            onOpenMeals={() => {
+              setSettingsSub(null);
+              setCurrentTab('meals');
+            }}
+          />}
 
         {currentTab === 'settings' && settingsSub === null && (
           <SettingsModal
