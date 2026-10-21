@@ -5,7 +5,7 @@ import { recipeMatchesQuery } from '../services/search';
 import { usePeople, addPerson } from '../services/peopleService';
 import { Conflict, conflictKey, describeConflict, mealConflicts, recipeConflicts } from '../services/dietService';
 import { showToast } from '../services/toast';
-import { Meal, combineIngredients, toShoppingItems } from '../services/mealService';
+import { Meal, combineIngredients, formatMealDate, servedBefore, toShoppingItems } from '../services/mealService';
 
 interface MealsProps {
   recipes: Recipe[];
@@ -126,6 +126,16 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
     const meal = meals.find((m) => m.id === pickerMealId);
     const attendees = people.filter((p) => (meal?.attendeeIds || []).includes(p.id));
     return attendees.length > 0 ? recipeConflicts(recipe, attendees) : [];
+  };
+
+  // "Made before for Anna (18 Oct), Bram": which of the people at this meal already had a recipe at another meal
+  const servedNote = (mealId: string, recipeId: string): string => {
+    const meal = meals.find((m) => m.id === mealId);
+    if (!meal || !(meal.attendeeIds || []).length) return '';
+    const hits = servedBefore(meals, recipeId, meal.attendeeIds || [], mealId);
+    return hits
+      .map((h) => `${people.find((p) => p.id === h.personId)?.name || '?'}${formatMealDate(h.meal) ? ` (${formatMealDate(h.meal)})` : ''}`)
+      .join(', ');
   };
 
   const pickerRecipes = recipes.filter((r) => recipeMatchesQuery(r, pickerSearch));
@@ -297,6 +307,7 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
                 const recipe = recipeById.get(entry.recipeId);
                 return (
                   <div key={`${entry.recipeId}-${index}`} className="meals-entry">
+                    <div className="meals-entry-main">
                     {recipe ? (
                       <button type="button" className="meals-entry-title meals-entry-link" title="Open this recipe" onClick={() => onOpenRecipe(recipe)}>
                         {recipe.title}
@@ -304,6 +315,10 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
                     ) : (
                       <span className="meals-entry-title">Deleted recipe</span>
                     )}
+                    {servedNote(meal.id, entry.recipeId) && (
+                      <small className="meals-served">Made before for {servedNote(meal.id, entry.recipeId)}</small>
+                    )}
+                    </div>
                     <div className="meals-entry-controls">
                       <button className="meals-mini-btn" onClick={() => changeServings(meal.id, index, -1)} aria-label="Fewer servings">
                         <Minus size={12} />
@@ -395,6 +410,9 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
                   <button onClick={() => addRecipe(pickerMealId, r)}>
                     <span>{r.title}</span>
                     <small>{r.servings} servings · {r.category}</small>
+                    {pickerMealId && servedNote(pickerMealId, r.id) && (
+                      <small className="meals-served">Made before for {servedNote(pickerMealId, r.id)}</small>
+                    )}
                     {pickerWarnings(r).map((c) => (
                       <small key={conflictKey(c)} className={`meals-picker-warn ${c.kind}`}>⚠ {c.person.name}: {c.kind === 'allergy' ? 'allergic to' : 'dislikes'} {c.term} ({c.ingredient})</small>
                     ))}
@@ -439,6 +457,8 @@ export const Meals: React.FC<MealsProps> = ({ recipes, meals, onUpdateMeals, onA
         .meals-name-input:hover, .meals-name-input:focus { border-color: var(--border-color); outline: none; background: var(--bg-input); }
         .meals-meal-actions { display: flex; gap: 0.4rem; }
         .meals-entry { background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.5rem 0.6rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+        .meals-entry-main { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+        .meals-served { color: var(--text-muted); font-size: 0.78rem; }
         .meals-entry-link { background: none; border: none; padding: 0; text-align: left; cursor: pointer; font-family: inherit; }
         .meals-entry-link:hover { color: var(--accent-primary); text-decoration: underline; }
         .meals-entry-link:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; border-radius: 2px; }

@@ -26,6 +26,59 @@ export interface CombinedIngredient {
   recipes: string[];
 }
 
+// When a meal happened: its date, else the day it was created
+const mealTime = (m: Meal): number => Date.parse(m.date || m.createdAt) || 0;
+const newestFirst = (a: Meal, b: Meal) => mealTime(b) - mealTime(a);
+
+/** The meals a person was at, newest first. */
+export const mealsOfPerson = (meals: Meal[], personId: string): Meal[] =>
+  meals.filter((m) => (m.attendeeIds || []).includes(personId)).sort(newestFirst);
+
+/** The meals a recipe was part of, newest first. */
+export const mealsWithRecipe = (meals: Meal[], recipeId: string): Meal[] =>
+  meals.filter((m) => m.recipes.some((r) => r.recipeId === recipeId)).sort(newestFirst);
+
+export interface ServedRecipe {
+  recipeId: string;
+  count: number; // in how many meals
+  last: Meal; // the most recent of them
+  withNames: string[]; // ids of the others at those meals
+}
+
+/** The recipes served to a person, from the meals they were at: how often, when last, and with whom. */
+export function recipesServedTo(meals: Meal[], personId: string): ServedRecipe[] {
+  const byRecipe = new Map<string, ServedRecipe>();
+  for (const meal of mealsOfPerson(meals, personId)) {
+    // newest first: the first meal seen for a recipe is the latest one
+    for (const id of new Set(meal.recipes.map((r) => r.recipeId))) {
+      const others = (meal.attendeeIds || []).filter((p) => p !== personId);
+      const known = byRecipe.get(id);
+      if (!known) byRecipe.set(id, { recipeId: id, count: 1, last: meal, withNames: others });
+      else {
+        known.count += 1;
+        known.withNames = [...new Set([...known.withNames, ...others])];
+      }
+    }
+  }
+  return [...byRecipe.values()];
+}
+
+/**
+ * For each of these people: the latest earlier meal where they had this recipe ("did I make this for Anna?").
+ * `exceptMealId` is the meal being planned: it is skipped, and so are meals after it.
+ */
+export function servedBefore(meals: Meal[], recipeId: string, personIds: string[], exceptMealId?: string): { personId: string; meal: Meal }[] {
+  const planned = meals.find((m) => m.id === exceptMealId);
+  const past = mealsWithRecipe(meals, recipeId).filter((m) => m.id !== exceptMealId && (!planned || mealTime(m) <= mealTime(planned)));
+  return personIds.flatMap((personId) => {
+    const meal = past.find((m) => (m.attendeeIds || []).includes(personId));
+    return meal ? [{ personId, meal }] : [];
+  });
+}
+
+export const formatMealDate = (m: Meal): string =>
+  m.date ? new Date(m.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
 export const getStoredMeals = (): Meal[] => {
   try {
     const data = localStorage.getItem(STORAGE_KEY_MEALS);
