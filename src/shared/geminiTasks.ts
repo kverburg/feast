@@ -57,12 +57,20 @@ Rules:
 - Ingredient names: normal names of the target language, lowercase unless a proper noun (e.g. "Parmigiano-Reggiano"). Keep brand names.
 - Units: use the target language's usual abbreviations or words (Dutch: g, kg, ml, l, el, tl, teentje/teentjes, snufje, stuk/stuks, bosje; English: g, kg, ml, l, tbsp, tsp, clove/cloves, pinch, piece/pieces, bunch). Do not convert amounts or switch unit systems.
 - Keep every number, the number of sections, items and steps, and their order exactly as given. Do not add or remove anything.
+- "name" holds only the ingredient: never an amount or a number (the amount has its own field, and 0 means "no quantity, to taste": keep it).
 - Respond ONLY with JSON of exactly the same shape as the input ("notes" stays null when it is null), plus one extra field "sourceLanguage": "nl" if the source recipe was Dutch, otherwise "other".
 
 Recipe JSON:
 ${JSON.stringify(source)}`;
 
   return jsonRequest(prompt, 0.2);
+}
+
+// A model sometimes copies the amount into the name ("1 Salt and Pepper"): drop it unless the original name has one too
+const LEADING_QUANTITY = /^\s*[\d½¼¾⅓⅔⅛][\d.,/½¼¾⅓⅔⅛ ]*\s+(?=\p{L})/u;
+export function stripLeadingQuantity(translated: unknown, original: string): string {
+  const name = typeof translated === 'string' ? translated : '';
+  return LEADING_QUANTITY.test(original) ? name : name.replace(LEADING_QUANTITY, '');
 }
 
 /** Check a translation (the parsed JSON) against the recipe it was made for and merge it in. */
@@ -90,7 +98,7 @@ export function parseTranslation(recipe: Partial<Recipe>, out: any): GeminiTrans
         const t = out.ingredientSections[si].items[ii];
         return {
           ...item,
-          name: t.name || item.name,
+          name: stripLeadingQuantity(t.name, item.name) || item.name,
           unit: typeof t.unit === 'string' ? t.unit : item.unit,
           notes: item.notes ? t.notes || item.notes : item.notes,
         };

@@ -5,7 +5,8 @@ import { convertUnit, displayName, formatAmount, formatUnit } from '../services/
 import { StepText } from './StepText';
 import { Meal, formatMealDate, mealsWithRecipe } from '../services/mealService';
 import { usePeople } from '../services/peopleService';
-import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, Timer, Pause, RotateCcw, X, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
+import { exportRecipePdf } from '../services/pdfExport';
+import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, FileDown, Image as ImageIcon, Timer, Pause, RotateCcw, X, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
 
 interface RecipeDetailProps {
   recipe: Recipe;
@@ -140,6 +141,14 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         </button>
 
         <div className="detail-nav-actions">
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => exportRecipePdf(recipe, language, currentServings, unitSystem)}
+            title="Opens the print dialog: choose Save as PDF"
+          >
+            <FileDown size={16} />
+            <span>PDF</span>
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={() => onEdit(recipe)}>
             <Edit size={16} />
             <span>Edit</span>
@@ -211,6 +220,13 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
               <Play size={20} fill="#ffffff" />
               <span>Start Cook Mode</span>
             </button>
+
+            {recipe.sourceImage && (
+              <a href={recipe.sourceImage} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
+                <ImageIcon size={16} />
+                <span>Source photo</span>
+              </a>
+            )}
 
             {recipe.sourceUrl && (
               <a href={recipe.sourceUrl} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
