@@ -311,7 +311,7 @@ export const CookModeModal: React.FC<CookModeModalProps> = ({
                       return (
                         <li key={item.id} className="drawer-ing-item">
                           <span className="drawer-ing-amt">
-                            {parseFloat(shown.amount.toFixed(2))} {formatUnit(shown.unit, shown.amount, language)}
+                            {shown.amount ? `${parseFloat(shown.amount.toFixed(2))} ${formatUnit(shown.unit, shown.amount, language)}` : ''}
                           </span>
                           <span>{displayName(item, shown.amount, shown.unit)}</span>
                         </li>

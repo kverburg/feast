@@ -57,7 +57,7 @@ test('a registered photo is read by the server and left as a patch', async () =>
   assert.equal(patch.id, 'imp-a1');
   assert.equal(patch.result.title, 'Courgettesoep');
   assert.equal(patch.result.instructions[0].timerMinutes, 7);
-  assert.equal(patch.result.image, `/api/image/${IMG_ID}`);
+  assert.equal(patch.result.sourceImage, `/api/image/${IMG_ID}`);
   // the photo went to the model as inline data
   assert.equal(calls[0].body.contents[0].parts[1].inlineData.data, 'AQID');
   assert.equal(await acknowledge(env, [patch.key]), 1);

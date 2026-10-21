@@ -375,7 +375,7 @@ async function processImports(env, doc, { budgetMs = 20000, log = () => {} } = {
       }
       const request = buildImportRequest({ imageBase64: toBase64(value), mimeType: (metadata && metadata.type) || 'image/jpeg' });
       const result = parseImportResponse(await generateContent(env, request, 'default', log));
-      doc = await finishImport(env, doc, imp, { ...base, endedAt: Date.now(), result: { ...result, image: imp.imageUrl }, method: 'AI vision (server)', calls: 1 });
+      doc = await finishImport(env, doc, imp, { ...base, endedAt: Date.now(), result: { ...result, sourceImage: imp.imageUrl }, method: 'AI vision (server)', calls: 1 });
       doc.status = { state: 'working', note: '', nextAt: 0, failures: 0, updatedAt: Date.now() };
       await writeWork(env, doc);
       processed += 1;

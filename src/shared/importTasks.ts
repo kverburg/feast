@@ -24,7 +24,7 @@ export const IMPORT_PROMPT = `Extract the recipe from the content below and resp
 Rules:
 - Keep the original language of the recipe. Do not translate and do not convert units.
 - Ignore menus, ads, comments, related recipes and anything that is not part of this one recipe.
-- "amount" is a number (use decimals for fractions, 1 when unspecified); "unit" is empty when there is none.
+- "amount" is a number (use decimals for fractions); "unit" is empty when there is none. Use 0 when the recipe gives no quantity: "salt and pepper to taste", "naar smaak", "extra for serving". Do not put an amount in the ingredient name.
 - Use one section called "Ingredients" when the recipe does not split its ingredients into parts.
 - "timerMinutes" only when a step clearly names a duration; otherwise leave it out.`;
 
@@ -47,6 +47,26 @@ export function buildImportRequest(content: { text: string } | { imageBase64: st
         ]
       : [{ text: `${IMPORT_PROMPT}\n\nRecipe Source Content:\n${content.text}` }];
   return { contents: [{ parts }], generationConfig: { responseMimeType: 'application/json', temperature: 0.1 } };
+}
+
+// Seasonings are mostly "to taste": a bare "1" in front of them is a default, not a quantity.
+const SEASONING_WORDS = new Set([
+  'zout', 'peper', 'zwarte', 'witte', 'vers', 'verse', 'gemalen', 'versgemalen', 'grof', 'grove', 'fijn', 'fijne', 'zeezout', 'en', 'of',
+  'salt', 'pepper', 'black', 'white', 'fresh', 'freshly', 'ground', 'coarse', 'fine', 'sea', 'and', 'or', '&',
+]);
+const bare = (text: string) => text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z& ]+/g, ' ').split(' ').filter(Boolean);
+
+export const isSeasoningName = (name: string): boolean => {
+  const words = bare(name);
+  return words.length > 0 && words.some((w) => ['zout', 'peper', 'zeezout', 'salt', 'pepper'].includes(w)) && words.every((w) => SEASONING_WORDS.has(w));
+};
+
+/** Salt and pepper (alone or together) with a default amount of 1 and no unit get no quantity (0). */
+export function dropDefaultSeasoningAmounts(sections: IngredientSection[]): IngredientSection[] {
+  return sections.map((sec) => ({
+    ...sec,
+    items: sec.items.map((item) => (item.amount === 1 && !item.unit && isSeasoningName(item.name) ? { ...item, amount: 0 } : item)),
+  }));
 }
 
 // Models are unreliable with ids, types and counts; rebuild a clean recipe from their answer.
@@ -86,7 +106,7 @@ export function normalizeParsedRecipe(raw: any): Partial<Recipe> {
     servings: Math.max(1, Math.round(toNumber(raw.servings, 4))),
     prepTime: Math.max(0, Math.round(toNumber(raw.prepTime, 15))),
     cookTime: Math.max(0, Math.round(toNumber(raw.cookTime, 20))),
-    ingredientSections: sections,
+    ingredientSections: dropDefaultSeasoningAmounts(sections),
     instructions: steps,
   };
 }

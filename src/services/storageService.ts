@@ -1,3 +1,4 @@
+import { dropDefaultSeasoningAmounts } from '../shared/importTasks';
 import { Recipe, ShoppingItem } from '../types/recipe';
 
 const STORAGE_KEY_RECIPES = 'gourmet_craft_recipes_v1';
@@ -288,6 +289,18 @@ export const getStoredRecipes = (): Recipe[] => {
         }
       }
       return r;
+    });
+
+    // Migration: "1 zout en peper" (a default amount in front of salt/pepper) has no quantity. Recipes that wait
+    // for translation are left alone: their fingerprint includes the ingredients.
+    recipes = recipes.map((r) => {
+      if (r.translationPending) return r;
+      const nl = dropDefaultSeasoningAmounts(r.ingredientSections || []);
+      const en = r.ingredientSectionsEn ? dropDefaultSeasoningAmounts(r.ingredientSectionsEn) : undefined;
+      const changed = JSON.stringify(nl) !== JSON.stringify(r.ingredientSections) || (en && JSON.stringify(en) !== JSON.stringify(r.ingredientSectionsEn));
+      if (!changed) return r;
+      migrated = true;
+      return { ...r, ingredientSections: nl, ...(en ? { ingredientSectionsEn: en } : {}) };
     });
 
     if (migrated) {

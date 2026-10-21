@@ -7,6 +7,7 @@ import {
 } from './recipeParserService';
 import { parseRecipeWithGemini, isGeminiAvailable } from './geminiService';
 import { classifyGeminiError } from '../shared/geminiErrors';
+import { dropDefaultSeasoningAmounts } from '../shared/importTasks';
 import { findImageForRecipe } from './imageSearchService';
 import { withPendingTranslation, startTranslationQueue } from './translationService';
 import { getStoredRecipes, saveStoredRecipes } from './storageService';
@@ -191,7 +192,9 @@ async function parseJob(job: ImportJob, setMethod: (m: string) => void): Promise
   }
   setMethod('AI vision');
   const parsed = await withRetries(() => parseRecipeWithGemini(photo.dataUrl, true), setMethod, 'AI vision');
-  return { ...parsed, image: photo.dataUrl };
+  // The photo stays with the recipe as its source (when there is a server to keep it); the picture is a search result
+  const sourceImage = (await uploadDataUrl(photo.dataUrl)) || undefined;
+  return { ...parsed, sourceImage };
 }
 
 // Photos are read by the server when there is one: it keeps going when the app is closed.
@@ -211,6 +214,7 @@ async function handOffToServer(job: ImportJob): Promise<boolean> {
 
 // Build and save the recipe from what was read. Shared by the in-page import and the server's result.
 function saveImportedRecipe(parsed: Partial<Recipe>, id: string, image: string): Recipe {
+  const sections = dropDefaultSeasoningAmounts(parsed.ingredientSections || []);
   // live: you are waiting for this one, so it is translated and annotated now, not in the background batch
   const recipe: Recipe = withPendingTranslation({
     id,
@@ -222,7 +226,8 @@ function saveImportedRecipe(parsed: Partial<Recipe>, id: string, image: string):
     servings: parsed.servings || 4,
     image,
     sourceUrl: parsed.sourceUrl,
-    ingredientSections: parsed.ingredientSections || [],
+    sourceImage: parsed.sourceImage,
+    ingredientSections: sections,
     instructions: parsed.instructions || [],
     tags: parsed.tags || ['Imported'],
     isFavorite: false,
@@ -230,6 +235,20 @@ function saveImportedRecipe(parsed: Partial<Recipe>, id: string, image: string):
   }, true);
   saveStoredRecipes([recipe, ...getStoredRecipes()]);
   return recipe;
+}
+
+// Look for a picture of the dish (the photo of the page stays as the source) and swap it in unless the recipe was edited meanwhile
+async function replaceWithDishImage(recipe: Recipe): Promise<void> {
+  try {
+    const found = await findImageForRecipe(recipe.title, recipe.category, undefined, recipe.tags || []);
+    if (!found || found === recipe.image) return;
+    const all = getStoredRecipes();
+    const current = all.find((r) => r.id === recipe.id);
+    if (!current || current.image !== recipe.image) return;
+    saveStoredRecipes(all.map((r) => (r.id === recipe.id ? { ...r, image: found } : r)));
+  } catch {
+    // the photo stays as the picture
+  }
 }
 
 /** The server finished (or gave up on) a photo import: save the recipe or report the failure. */
@@ -260,7 +279,9 @@ export function completeServerImport(patch: Extract<ServerPatch, { kind: 'p' }>)
 
   const recipeId = `imp-${patch.id}`;
   if (getStoredRecipes().some((r) => r.id === recipeId)) return drop(); // already saved (another device or tab)
-  const recipe = saveImportedRecipe(patch.result, recipeId, patch.result.image || '');
+  // Saved right away with the photo as its picture; a nicer picture of the dish replaces it when one is found
+  const recipe = saveImportedRecipe(patch.result, recipeId, patch.result.sourceImage || '');
+  void replaceWithDishImage(recipe);
   recordLog({
     ...logBase,
     label: recipe.title,
