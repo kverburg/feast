@@ -276,12 +276,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         }
         .search-input {
           width: 100%;
-          padding: 0.6rem 2.5rem 0.6rem 2.75rem;
+          padding: 0.8rem 2.5rem 0.8rem 2.75rem;
           background: var(--bg-input);
           border: 1px solid var(--border-color);
           border-radius: var(--radius-full);
           color: var(--text-main);
-          font-size: 0.9rem;
+          font-size: 1rem;
           outline: none;
           transition: all 0.2s ease;
         }
@@ -341,7 +341,17 @@ export const Navbar: React.FC<NavbarProps> = ({
           }
           .search-input {
             min-width: 0;
-            padding-right: 2.25rem;
+            padding: 0.8rem 2.25rem 0.8rem 2.5rem;
+          }
+          .search-icon {
+            left: 0.8rem;
+          }
+          .search-box {
+            flex: 1 1 140px;
+          }
+          /* the logo is enough on a phone: the room goes to the search field */
+          .brand-name {
+            display: none;
           }
           .brand,
           .search-box,
