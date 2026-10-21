@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2, AlertTriangle, UtensilsCrossed, ShoppingBag, Settings, Sun, Moon, Search, Plus, CalendarDays } from 'lucide-react';
+import { Loader2, AlertTriangle, UtensilsCrossed, ShoppingBag, Settings, Sun, Moon, Search, Plus, CalendarDays, X } from 'lucide-react';
 
 interface NavbarProps {
   currentTab: 'recipes' | 'meals' | 'shopping' | 'settings';
@@ -47,11 +47,28 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Search size={18} className="search-icon" />
             <input
               type="text"
-              placeholder="Search recipes, ingredients, or parts..."
+              aria-label="Search recipes"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setSearchQuery('');
+              }}
               className="search-input"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                className="search-clear"
+                aria-label="Clear search"
+                title="Clear search"
+                onClick={(e) => {
+                  setSearchQuery('');
+                  (e.currentTarget.previousElementSibling as HTMLInputElement | null)?.focus();
+                }}
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
 
           <div className="nav-actions">
@@ -65,7 +82,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button className="nav-desktop-only btn btn-outline btn-sm" onClick={onOpenImportModal}>
               <Plus size={16} />
-              <span>Import / Add</span>
+              <span>Add</span>
             </button>
             {(importBusy > 0 || importFailed > 0) && (
               <button
@@ -134,7 +151,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={onOpenImportModal}
         >
           <Plus size={20} />
-          <span>Import/Add</span>
+          <span>Add</span>
         </button>
 
         <button
@@ -259,15 +276,32 @@ export const Navbar: React.FC<NavbarProps> = ({
         }
         .search-input {
           width: 100%;
-          padding: 0.6rem 1rem 0.6rem 2.75rem;
+          padding: 0.8rem 2.5rem 0.8rem 2.75rem;
           background: var(--bg-input);
           border: 1px solid var(--border-color);
           border-radius: var(--radius-full);
           color: var(--text-main);
-          font-size: 0.9rem;
+          font-size: 1rem;
           outline: none;
           transition: all 0.2s ease;
         }
+        .search-clear {
+          position: absolute;
+          right: 0.5rem;
+          top: 50%;
+          transform: translateY(-50%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 26px;
+          height: 26px;
+          border: none;
+          border-radius: 50%;
+          background: var(--bg-card-hover);
+          color: var(--text-muted);
+          cursor: pointer;
+        }
+        .search-clear:hover { color: var(--text-main); }
         .search-input:focus {
           border-color: var(--accent-primary);
           box-shadow: 0 0 0 3px var(--accent-glow);
@@ -307,7 +341,17 @@ export const Navbar: React.FC<NavbarProps> = ({
           }
           .search-input {
             min-width: 0;
-            padding-right: 0.5rem;
+            padding: 0.8rem 2.25rem 0.8rem 2.5rem;
+          }
+          .search-icon {
+            left: 0.8rem;
+          }
+          .search-box {
+            flex: 1 1 140px;
+          }
+          /* the logo is enough on a phone: the room goes to the search field */
+          .brand-name {
+            display: none;
           }
           .brand,
           .search-box,
