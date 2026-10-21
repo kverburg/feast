@@ -73,7 +73,7 @@ export const RecipeImportModal: React.FC<RecipeImportModalProps> = ({ onManualAd
         <div className="modal-header">
           <div className="import-modal-title">
             <Sparkles size={22} color="var(--accent-primary)" />
-            <h2>Import / Add Recipe</h2>
+            <h2>Add recipe</h2>
           </div>
           <button className="btn btn-secondary btn-icon" onClick={onClose}>
             <X size={20} />

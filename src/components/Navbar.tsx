@@ -82,7 +82,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button className="nav-desktop-only btn btn-outline btn-sm" onClick={onOpenImportModal}>
               <Plus size={16} />
-              <span>Import / Add</span>
+              <span>Add</span>
             </button>
             {(importBusy > 0 || importFailed > 0) && (
               <button
@@ -151,7 +151,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={onOpenImportModal}
         >
           <Plus size={20} />
-          <span>Import/Add</span>
+          <span>Add</span>
         </button>
 
         <button
