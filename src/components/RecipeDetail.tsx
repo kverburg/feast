@@ -3,7 +3,8 @@ import React, { useEffect, useState } from 'react';
 import { Recipe, IngredientItem } from '../types/recipe';
 import { convertUnit, displayName, formatAmount, formatUnit } from '../services/amounts';
 import { StepText } from './StepText';
-import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, Image as ImageIcon, Timer, Pause, RotateCcw, X, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
+import { exportRecipePdf } from '../services/pdfExport';
+import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, FileDown, Image as ImageIcon, Timer, Pause, RotateCcw, X, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
 
 interface RecipeDetailProps {
   recipe: Recipe;
@@ -132,6 +133,14 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         </button>
 
         <div className="detail-nav-actions">
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => exportRecipePdf(recipe, language, currentServings, unitSystem)}
+            title="Opens the print dialog: choose Save as PDF"
+          >
+            <FileDown size={16} />
+            <span>PDF</span>
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={() => onEdit(recipe)}>
             <Edit size={16} />
             <span>Edit</span>
