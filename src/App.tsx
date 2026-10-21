@@ -452,6 +452,11 @@ export function App() {
               setSettingsSub(null);
               setCurrentTab('meals');
             }}
+            onOpenRecipe={(recipe) => {
+              setSettingsSub(null);
+              setCurrentTab('recipes');
+              setSelectedRecipe(recipe);
+            }}
           />}
 
         {currentTab === 'settings' && settingsSub === null && (
