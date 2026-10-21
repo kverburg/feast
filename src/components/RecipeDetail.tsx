@@ -137,7 +137,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
       <div className="detail-nav">
         <button className="btn btn-secondary btn-sm" onClick={onBack}>
           <ArrowLeft size={16} />
-          <span>Back to Recipes</span>
+          <span>Back<span className="nav-wide"> to Recipes</span></span>
         </button>
 
         <div className="detail-nav-actions">
@@ -437,6 +437,21 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 0.5rem;
+        }
+        /* One row, equal height, labels never wrap */
+        .detail-nav .btn {
+          height: 38px;
+          padding-top: 0;
+          padding-bottom: 0;
+          white-space: nowrap;
+          flex-shrink: 0;
+          justify-content: center;
+        }
+        @media (max-width: 600px) {
+          .nav-wide { display: none; }
+          .detail-nav, .detail-nav-actions { gap: 0.4rem; }
+          .detail-nav .btn { padding-left: 0.6rem; padding-right: 0.6rem; }
         }
         .detail-nav-actions {
           display: flex;
