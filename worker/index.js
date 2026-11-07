@@ -1,6 +1,7 @@
 import { geminiProxy } from './gemini.js';
-import { processWork, readWork, acknowledge, clipWorkList, pendingEntries, addImport } from './work.js';
+import { processWork, readWork, acknowledge, clipWorkList, pendingEntries, addImport, enqueueFeedback } from './work.js';
 import { aiReady } from './providers.js';
+import { readProposals, createFeedback, addComment, decide } from './feedback.js';
 import { getVapid, addSubscription, removeSubscription, readSubscriptions, sendPush } from './push.js';
 
 // Feast: serves the app (static assets) and stores one shared state in KV.
@@ -193,6 +194,8 @@ async function handleBench(url, req, env) {
 // Web Push: the browser asks for the public key, subscribes, and hands its subscription to the worker
 async function handlePush(url, req, env) {
   const subject = url.origin;
+  // the app's address identifies it to push services; the cron has no request, so it is remembered here
+  if ((await env.FEAST.get('push:subject')) !== subject) await env.FEAST.put('push:subject', subject);
   if (url.pathname === '/api/push/key' && req.method === 'GET') {
     const { publicKey } = await getVapid(env);
     const subs = await readSubscriptions(env);
@@ -214,6 +217,38 @@ async function handlePush(url, req, env) {
   return new Response('Not found', { status: 404 });
 }
 
+// Recipe feedback and the proposals made from it (see feedback.js)
+async function handleFeedback(url, req, env, ctx) {
+  if (url.pathname === '/api/feedback' && req.method === 'GET') {
+    const list = await readProposals(env);
+    // the recipe snapshot is only needed server side: the app compares with its own copy
+    return json(list.map(({ base, ...rest }) => rest));
+  }
+  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+  let body;
+  try { body = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
+  const kick = () => ctx && ctx.waitUntil(processWork(env, { log, subject: url.origin }));
+
+  if (url.pathname === '/api/feedback') {
+    const p = await createFeedback(env, body || {});
+    if (!p) return json({ error: 'rejected' }, 400);
+    await enqueueFeedback(env, p.id);
+    kick();
+    return json({ ok: true, id: p.id });
+  }
+  if (url.pathname === '/api/feedback/comment') {
+    const p = await addComment(env, body && body.id, body && body.comment);
+    if (!p) return json({ error: 'rejected' }, 400);
+    await enqueueFeedback(env, p.id);
+    kick();
+    return json({ ok: true });
+  }
+  if (url.pathname === '/api/feedback/decide') {
+    return (await decide(env, body && body.id, body && body.decision)) ? json({ ok: true }) : json({ error: 'rejected' }, 400);
+  }
+  return new Response('Not found', { status: 404 });
+}
+
 async function route(req, env, ctx) {
   const url = new URL(req.url);
   const isState = url.pathname === '/api/state';
@@ -224,7 +259,8 @@ async function route(req, env, ctx) {
   const isWork = url.pathname === '/api/work' || url.pathname === '/api/work/ack' || url.pathname === '/api/work/retry' || url.pathname === '/api/work/import';
   const isBench = url.pathname === '/api/bench' || url.pathname === '/api/bench/run';
   const isPush = url.pathname.startsWith('/api/push/');
-  if (!isState && !isBench && !isPush && !isGemini && !isImage && !isActivity && !isClientLog && !isWork) return env.ASSETS.fetch(req);
+  const isFeedback = url.pathname === '/api/feedback' || url.pathname.startsWith('/api/feedback/');
+  if (!isState && !isBench && !isPush && !isFeedback && !isGemini && !isImage && !isActivity && !isClientLog && !isWork) return env.ASSETS.fetch(req);
 
   // Cloudflare Access adds this header after login. Without it, refuse.
   // (DEV_SKIP_ACCESS is only ever set in .dev.vars for running the worker locally.)
@@ -233,6 +269,7 @@ async function route(req, env, ctx) {
   if (isWork) return handleWork(url, req, env, ctx);
   if (isBench) return handleBench(url, req, env);
   if (isPush) return handlePush(url, req, env);
+  if (isFeedback) return handleFeedback(url, req, env, ctx);
   if (isGemini) return handleGemini(url, req, env);
   if (isImage) return handleImage(url, req, env);
   if (isActivity) return handleActivity(req, env);

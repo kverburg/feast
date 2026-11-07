@@ -29,6 +29,8 @@ import { Toasts } from './components/Toasts';
 import { ActivityLog } from './components/ActivityLog';
 import { BenchmarkResults } from './components/BenchmarkResults';
 import { PeopleSettings } from './components/PeopleSettings';
+import { ReviewList } from './components/ReviewList';
+import { startReviewWatcher } from './services/reviewWatcher';
 import { showToast } from './services/toast';
 import { getImportJobs, startImportQueue, subscribeImportEvents, subscribeImportJobs } from './services/importQueue';
 import { pullActivity } from './services/activityLog';
@@ -43,7 +45,7 @@ export function App() {
   const [importCounts, setImportCounts] = useState({ busy: 0, failed: 0 });
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [currentTab, setCurrentTab] = useState<'recipes' | 'meals' | 'shopping' | 'settings'>('recipes');
-  const [settingsSub, setSettingsSub] = useState<'activity' | 'benchmark' | 'people' | null>(null); // sub page of Settings
+  const [settingsSub, setSettingsSub] = useState<'activity' | 'benchmark' | 'people' | 'review' | null>(null); // sub page of Settings
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals & Overlay States
@@ -67,7 +69,7 @@ export function App() {
     tab: Tab;
     recipeId: string | null;
     modal: 'form' | 'import' | 'cook' | null;
-    sub: 'activity' | 'benchmark' | 'people' | null;
+    sub: 'activity' | 'benchmark' | 'people' | 'review' | null;
   }
   interface HistoryEntry {
     nav: NavState;
@@ -159,7 +161,7 @@ export function App() {
     // Opened on a deep link (#/recipe/<id> or #/meals ...): the list stays one Back away
     const hash = initialHashRef.current;
     const recipeMatch = hash.match(/^#\/recipe\/(.+)$/);
-    const tabMatch = hash.match(/^#\/(meals|shopping|settings(?:\/(?:activity|benchmark|people))?)$/);
+    const tabMatch = hash.match(/^#\/(meals|shopping|settings(?:\/(?:activity|benchmark|people|review))?)$/);
     const deepRecipe = recipeMatch ? loadedRecipes.find((r) => r.id === decodeURIComponent(recipeMatch[1])) : undefined;
     if ((deepRecipe || tabMatch) && !deepLinkHandledRef.current) {
       deepLinkHandledRef.current = true;
@@ -170,7 +172,7 @@ export function App() {
             tab: tabMatch![1].split('/')[0] as Tab,
             recipeId: null,
             modal: null,
-            sub: tabMatch![1].endsWith('/activity') ? 'activity' : tabMatch![1].endsWith('/benchmark') ? 'benchmark' : tabMatch![1].endsWith('/people') ? 'people' : null,
+            sub: tabMatch![1].endsWith('/activity') ? 'activity' : tabMatch![1].endsWith('/benchmark') ? 'benchmark' : tabMatch![1].endsWith('/people') ? 'people' : tabMatch![1].endsWith('/review') ? 'review' : null,
           };
       window.history.replaceState({ nav: listNav, idx: 0, prevKey: null } as HistoryEntry, '', '#/');
       window.history.pushState({ nav: target, idx: 1, prevKey: JSON.stringify(listNav) } as HistoryEntry, '', hashFor(target));
@@ -196,6 +198,13 @@ export function App() {
       if (!m) setDismissedError(null);
     });
     startTranslationQueue();
+
+    // Recipes the AI made a proposal for (from feedback): a badge, and a toast when a new one is ready
+    const stopReviewWatcher = startReviewWatcher(() => {
+      setSelectedRecipe(null);
+      setCurrentTab('settings');
+      setSettingsSub('review');
+    });
 
     // Background imports: notify when done or failed, resume anything still queued from last time
     const updateImportCounts = () => {
@@ -242,6 +251,7 @@ export function App() {
     return () => {
       unsubscribeChange();
       unsubscribeError();
+      stopReviewWatcher();
       unsubscribeJobs();
       unsubscribeImports();
     };
@@ -392,6 +402,11 @@ export function App() {
               meals={meals}
               onOpenMeals={() => setCurrentTab('meals')}
               keepAwake={!isFormOpen && !isImportOpen}
+              onOpenReview={() => {
+                setSelectedRecipe(null);
+                setCurrentTab('settings');
+                setSettingsSub('review');
+              }}
             />
           ) : (
             <RecipeList
@@ -445,6 +460,17 @@ export function App() {
           <BenchmarkResults onBack={() => setSettingsSub(null)} />
         )}
 
+        {currentTab === 'settings' && settingsSub === 'review' && (
+          <ReviewList
+            onBack={() => setSettingsSub(null)}
+            onOpenRecipe={(recipe) => {
+              setSettingsSub(null);
+              setCurrentTab('recipes');
+              setSelectedRecipe(recipe);
+            }}
+          />
+        )}
+
         {currentTab === 'settings' && settingsSub === 'people' && <PeopleSettings
             onBack={() => setSettingsSub(null)}
             meals={meals}
@@ -465,6 +491,7 @@ export function App() {
             onOpenActivityLog={() => setSettingsSub('activity')}
             onOpenBenchmark={() => setSettingsSub('benchmark')}
             onOpenPeople={() => setSettingsSub('people')}
+            onOpenReview={() => setSettingsSub('review')}
             recipes={recipes}
             onImportBackup={(newRecipes) => {
               setRecipes(newRecipes);

@@ -98,6 +98,11 @@ export function subscribeTranslationChange(cb: () => void): () => void {
   return () => changeListeners.delete(cb);
 }
 
+/** For code that edits stored recipes itself: tells the UI to reload them. */
+export function notifyRecipesChanged(): void {
+  changeListeners.forEach((cb) => cb());
+}
+
 /** Called with a message when translation is blocked by a missing/rejected key, and null when fine. */
 export function subscribeTranslationError(cb: (message: string | null) => void): () => void {
   errorListeners.add(cb);

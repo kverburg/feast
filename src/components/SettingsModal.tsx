@@ -4,9 +4,10 @@ import { verifyGeminiKey, getGeminiStatus } from '../services/geminiService';
 import { startTranslationQueue } from '../services/translationService';
 import { usePeople } from '../services/peopleService';
 import { NotificationSettings } from './NotificationSettings';
+import { useReviewCount } from '../services/reviewWatcher';
 import { startLog, finishLog } from '../services/activityLog';
 import { showToast } from '../services/toast';
-import { Activity, Gauge, Users, Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
+import { Activity, ClipboardCheck, Gauge, Users, Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
 import { Recipe } from '../types/recipe';
 import { parseCookmateXml } from '../services/cookmateImportService';
 
@@ -20,6 +21,7 @@ interface SettingsModalProps {
   onToggleVoice: (enabled: boolean) => void;
   onOpenBenchmark: () => void;
   onOpenPeople: () => void;
+  onOpenReview: () => void;
   onOpenActivityLog: () => void;
 }
 
@@ -28,6 +30,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenActivityLog,
   onOpenBenchmark,
   onOpenPeople,
+  onOpenReview,
   onImportBackup,
   onResetSeed,
   theme,
@@ -46,6 +49,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [verifyResult, setVerifyResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const people = usePeople();
+  const reviewCount = useReviewCount();
 
   const handleVerifyKey = async () => {
     setVerifying(true);
@@ -291,6 +295,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               )}
             </div>
           </form>
+        </div>
+
+        <div className="settings-card card">
+          <div className="setting-row">
+            <div>
+              <span className="setting-name">Recipes to check</span>
+              <p className="setting-desc">
+                Feedback you gave on recipes: the AI proposes a change and you approve, decline or comment.
+                {reviewCount > 0 ? ` ${reviewCount} ${reviewCount === 1 ? 'is' : 'are'} ready to check.` : ''}
+              </p>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={onOpenReview}>
+              <ClipboardCheck size={16} />
+              <span>{reviewCount > 0 ? `Check (${reviewCount})` : 'Open'}</span>
+            </button>
+          </div>
         </div>
 
         <NotificationSettings />

@@ -7,7 +7,8 @@ import { useWakeLock } from '../hooks/useWakeLock';
 import { Meal, formatMealDate, mealsWithRecipe } from '../services/mealService';
 import { usePeople } from '../services/peopleService';
 import { exportRecipePdf } from '../services/pdfExport';
-import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, FileDown, Image as ImageIcon, Timer, Pause, RotateCcw, X, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
+import { FeedbackDialog } from './FeedbackDialog';
+import { Clock, Users, Flame, Heart, Edit, Trash2, ShoppingBag, Play, ArrowLeft, ExternalLink, FileDown, MessageSquare, Image as ImageIcon, Timer, Pause, RotateCcw, X, CheckSquare, Square, Layers, RefreshCw } from 'lucide-react';
 
 interface RecipeDetailProps {
   recipe: Recipe;
@@ -21,6 +22,7 @@ interface RecipeDetailProps {
   meals: Meal[];
   onOpenMeals: () => void;
   keepAwake?: boolean; // false while a dialog (edit form, import) covers the recipe
+  onOpenReview?: () => void; // the "Recipes to check" page in Settings
 }
 
 export const RecipeDetail: React.FC<RecipeDetailProps> = ({
@@ -35,8 +37,10 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   meals,
   onOpenMeals,
   keepAwake = true,
+  onOpenReview = () => {},
 }) => {
   useWakeLock(keepAwake); // the screen stays on while a recipe is open, and nowhere else
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const people = usePeople();
   const recipeMeals = mealsWithRecipe(meals, recipe.id);
   // Displayed fields based on selected language
@@ -152,6 +156,10 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           >
             <FileDown size={16} />
             <span>PDF</span>
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setFeedbackOpen(true)} title="Tell what to improve: the AI proposes a change for you to check">
+            <MessageSquare size={16} />
+            <span>Feedback</span>
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => onEdit(recipe)}>
             <Edit size={16} />
@@ -383,6 +391,17 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
 
         </div>
       </div>
+
+      {feedbackOpen && (
+        <FeedbackDialog
+          recipe={recipe}
+          onClose={() => setFeedbackOpen(false)}
+          onOpenReview={() => {
+            setFeedbackOpen(false);
+            onOpenReview();
+          }}
+        />
+      )}
 
       {recipeMeals.length > 0 && (
         <div className="recipe-meals card">
