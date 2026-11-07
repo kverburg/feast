@@ -151,21 +151,22 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         <div className="detail-nav-actions">
           <button
             className="btn btn-secondary btn-sm"
+            aria-label="PDF"
             onClick={() => exportRecipePdf(recipe, language, currentServings, unitSystem)}
             title="Opens the print dialog: choose Save as PDF"
           >
             <FileDown size={16} />
             <span>PDF</span>
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => setFeedbackOpen(true)} title="Tell what to improve: the AI proposes a change for you to check">
+          <button className="btn btn-secondary btn-sm" aria-label="Feedback" onClick={() => setFeedbackOpen(true)} title="Tell what to improve: the AI proposes a change for you to check">
             <MessageSquare size={16} />
             <span>Feedback</span>
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => onEdit(recipe)}>
+          <button className="btn btn-secondary btn-sm" aria-label="Edit" title="Edit" onClick={() => onEdit(recipe)}>
             <Edit size={16} />
             <span>Edit</span>
           </button>
-          <button className="btn btn-outline btn-sm danger" onClick={() => onDelete(recipe.id)}>
+          <button className="btn btn-outline btn-sm danger" aria-label="Delete" title="Delete" onClick={() => onDelete(recipe.id)}>
             <Trash2 size={16} />
             <span>Delete</span>
           </button>
@@ -475,6 +476,9 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           .nav-wide { display: none; }
           .detail-nav, .detail-nav-actions { gap: 0.4rem; }
           .detail-nav .btn { padding-left: 0.6rem; padding-right: 0.6rem; }
+          /* five buttons do not fit with labels: the actions become icons (Back keeps its word) */
+          .detail-nav-actions .btn { width: 42px; padding-left: 0; padding-right: 0; }
+          .detail-nav-actions .btn span { display: none; }
         }
         .detail-nav-actions {
           display: flex;
