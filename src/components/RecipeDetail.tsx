@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Recipe, IngredientItem } from '../types/recipe';
 import { convertUnit, displayName, formatAmount, formatUnit } from '../services/amounts';
 import { StepText } from './StepText';
+import { useWakeLock } from '../hooks/useWakeLock';
 import { Meal, formatMealDate, mealsWithRecipe } from '../services/mealService';
 import { usePeople } from '../services/peopleService';
 import { exportRecipePdf } from '../services/pdfExport';
@@ -19,6 +20,7 @@ interface RecipeDetailProps {
   onAddToShoppingList: (items: any[]) => void;
   meals: Meal[];
   onOpenMeals: () => void;
+  keepAwake?: boolean; // false while a dialog (edit form, import) covers the recipe
 }
 
 export const RecipeDetail: React.FC<RecipeDetailProps> = ({
@@ -32,7 +34,9 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   onAddToShoppingList,
   meals,
   onOpenMeals,
+  keepAwake = true,
 }) => {
+  useWakeLock(keepAwake); // the screen stays on while a recipe is open, and nowhere else
   const people = usePeople();
   const recipeMeals = mealsWithRecipe(meals, recipe.id);
   // Displayed fields based on selected language
