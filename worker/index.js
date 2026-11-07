@@ -1,6 +1,7 @@
 import { geminiProxy } from './gemini.js';
 import { processWork, readWork, acknowledge, clipWorkList, pendingEntries, addImport } from './work.js';
 import { aiReady } from './providers.js';
+import { getVapid, addSubscription, removeSubscription, readSubscriptions, sendPush } from './push.js';
 
 // Feast: serves the app (static assets) and stores one shared state in KV.
 const json = (o, status = 200) =>
@@ -189,6 +190,30 @@ async function handleBench(url, req, env) {
   return new Response(raw || '[]', { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
 
+// Web Push: the browser asks for the public key, subscribes, and hands its subscription to the worker
+async function handlePush(url, req, env) {
+  const subject = url.origin;
+  if (url.pathname === '/api/push/key' && req.method === 'GET') {
+    const { publicKey } = await getVapid(env);
+    const subs = await readSubscriptions(env);
+    return json({ publicKey, devices: subs.length });
+  }
+  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+  let body;
+  try { body = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
+  if (url.pathname === '/api/push/subscribe') {
+    return (await addSubscription(env, body && body.subscription, body && body.label)) ? json({ ok: true }) : json({ error: 'bad subscription' }, 400);
+  }
+  if (url.pathname === '/api/push/unsubscribe') {
+    return json({ ok: true, removed: await removeSubscription(env, body && body.endpoint) });
+  }
+  if (url.pathname === '/api/push/test') {
+    const result = await sendPush(env, { title: 'Feast', body: 'Notifications work.', url: '/', tag: 'test' }, { subject, log });
+    return json({ ok: true, ...result });
+  }
+  return new Response('Not found', { status: 404 });
+}
+
 async function route(req, env, ctx) {
   const url = new URL(req.url);
   const isState = url.pathname === '/api/state';
@@ -198,7 +223,8 @@ async function route(req, env, ctx) {
   const isClientLog = url.pathname === '/api/log';
   const isWork = url.pathname === '/api/work' || url.pathname === '/api/work/ack' || url.pathname === '/api/work/retry' || url.pathname === '/api/work/import';
   const isBench = url.pathname === '/api/bench' || url.pathname === '/api/bench/run';
-  if (!isState && !isBench && !isGemini && !isImage && !isActivity && !isClientLog && !isWork) return env.ASSETS.fetch(req);
+  const isPush = url.pathname.startsWith('/api/push/');
+  if (!isState && !isBench && !isPush && !isGemini && !isImage && !isActivity && !isClientLog && !isWork) return env.ASSETS.fetch(req);
 
   // Cloudflare Access adds this header after login. Without it, refuse.
   // (DEV_SKIP_ACCESS is only ever set in .dev.vars for running the worker locally.)
@@ -206,6 +232,7 @@ async function route(req, env, ctx) {
 
   if (isWork) return handleWork(url, req, env, ctx);
   if (isBench) return handleBench(url, req, env);
+  if (isPush) return handlePush(url, req, env);
   if (isGemini) return handleGemini(url, req, env);
   if (isImage) return handleImage(url, req, env);
   if (isActivity) return handleActivity(req, env);

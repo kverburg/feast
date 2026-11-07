@@ -3,6 +3,7 @@ import { getStoredApiKey, saveStoredApiKey } from '../services/storageService';
 import { verifyGeminiKey, getGeminiStatus } from '../services/geminiService';
 import { startTranslationQueue } from '../services/translationService';
 import { usePeople } from '../services/peopleService';
+import { NotificationSettings } from './NotificationSettings';
 import { startLog, finishLog } from '../services/activityLog';
 import { showToast } from '../services/toast';
 import { Activity, Gauge, Users, Settings, Sun, Moon, Download, Upload, Key, RefreshCcw, Check, Sparkles, Mic, MicOff, FileCode } from 'lucide-react';
@@ -291,6 +292,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </form>
         </div>
+
+        <NotificationSettings />
 
         <div className="settings-card card">
           <div className="setting-row">
