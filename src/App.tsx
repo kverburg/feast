@@ -391,6 +391,7 @@ export function App() {
               onAddToShoppingList={handleAddItemsToShoppingList}
               meals={meals}
               onOpenMeals={() => setCurrentTab('meals')}
+              keepAwake={!isFormOpen && !isImportOpen}
             />
           ) : (
             <RecipeList
