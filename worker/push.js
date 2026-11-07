@@ -124,7 +124,8 @@ export async function encryptPayload(subscription, plaintext) {
  * Subscriptions the push service reports as gone (404/410) are removed.
  * Returns { sent, failed, removed }.
  */
-export async function sendPush(env, message, { subject = 'https://feast.invalid', log = () => {} } = {}) {
+export async function sendPush(env, message, { subject, log = () => {} } = {}) {
+  subject = subject || (await env.FEAST.get('push:subject')) || 'https://feast.invalid';
   const subs = await readSubscriptions(env);
   const body = enc.encode(JSON.stringify(message));
   const result = { sent: 0, failed: 0, removed: 0 };

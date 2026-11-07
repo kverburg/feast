@@ -19,6 +19,7 @@ import {
   parseAnnotation,
   readJson,
 } from '../src/shared/geminiTasks.ts';
+import { runProposal } from './feedback.js';
 import { buildImportRequest, parseImportResponse } from '../src/shared/importTasks.ts';
 import { classifyGeminiError, GeminiHttpError } from '../src/shared/geminiErrors.ts';
 import { contentHash, annotationSource, isUntouchedPending, needsAnnotation } from '../src/shared/recipeWork.ts';
@@ -36,7 +37,7 @@ const METADATA_LIMIT = 1000; // KV allows 1024 bytes
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const emptyWork = () => ({ patches: [], imports: [], attempts: {}, batches: [], batchModel: '', batchOff: null, status: { state: 'idle', note: '', nextAt: 0, failures: 0, updatedAt: 0 } });
+export const emptyWork = () => ({ patches: [], imports: [], feedbackQueue: [], attempts: {}, batches: [], batchModel: '', batchOff: null, status: { state: 'idle', note: '', nextAt: 0, failures: 0, updatedAt: 0 } });
 
 export async function readWork(env) {
   try {
@@ -47,7 +48,7 @@ export async function readWork(env) {
   }
 }
 
-async function writeWork(env, doc) {
+export async function writeWork(env, doc) {
   const cutoff = Date.now() - PATCH_MAX_AGE_MS;
   doc.patches = doc.patches.filter((p) => p.endedAt > cutoff).slice(-MAX_PATCHES);
   await env.FEAST.put('work', JSON.stringify(doc));
@@ -107,8 +108,16 @@ export async function processWork(env, opts = {}) {
 
   const allEntries = await pendingEntries(env);
   let doc = await readWork(env);
-  if (allEntries.length === 0 && doc.batches.length === 0 && doc.imports.length === 0) return 'idle';
+  if (allEntries.length === 0 && doc.batches.length === 0 && doc.imports.length === 0 && doc.feedbackQueue.length === 0) return 'idle';
   if (doc.status.nextAt > Date.now()) return 'backing_off';
+
+  // Feedback proposals: made with direct calls, you are waiting to check them
+  if (doc.feedbackQueue.length > 0) {
+    const fb = await processFeedbackQueue(env, doc, opts);
+    doc = await readWork(env);
+    if (doc.status.nextAt > Date.now()) return fb;
+    if (allEntries.length === 0 && doc.batches.length === 0 && doc.imports.length === 0) return fb;
+  }
 
   // Photo imports first: you are waiting for them, and they need direct calls
   let importResult = 'none';
@@ -317,6 +326,57 @@ async function submitNewBatch(env, doc, entries, log) {
   await writeWork(env, doc);
   log('warn', { event: 'batch_unavailable', status: lastStatus });
   return 'batch_unavailable';
+}
+
+// ---- feedback proposals -----------------------------------------------------------------------------------
+// See feedback.js. The queue holds the ids of proposals that still have to be made.
+
+export async function enqueueFeedback(env, id) {
+  const doc = await readWork(env);
+  if (!doc.feedbackQueue.includes(id)) {
+    doc.feedbackQueue.push(id);
+    await writeWork(env, doc);
+  }
+}
+
+async function processFeedbackQueue(env, doc, { budgetMs = 20000, log = () => {}, subject } = {}) {
+  const started = Date.now();
+  let processed = 0;
+  for (const id of [...doc.feedbackQueue]) {
+    if (Date.now() - started > budgetMs) break;
+    try {
+      const result = await runProposal(env, id, { log, subject });
+      if (result === 'done') {
+        doc = await freshCopy(env, doc);
+        doc.feedbackQueue = doc.feedbackQueue.filter((x) => x !== id);
+        await writeWork(env, doc);
+        processed += 1;
+      }
+    } catch (e) {
+      const kind = classifyGeminiError(e);
+      const reason = e instanceof Error ? e.message : String(e);
+      doc = await freshCopy(env, doc);
+      if (kind === 'transient') {
+        const failures = (doc.status.failures || 0) + 1;
+        const wait = backoffFor(failures);
+        doc.status = { state: 'waiting', note: `Gemini is rate limiting or unavailable (${reason}); trying again in ${Math.round(wait / 60000)} min`, nextAt: Date.now() + wait, failures, updatedAt: Date.now() };
+        await writeWork(env, doc);
+        log('warn', { event: 'feedback_waiting', reason, waitMs: wait });
+        return 'rate_limited';
+      }
+      doc.status = {
+        state: 'stopped',
+        note: e instanceof GeminiHttpError ? `Gemini rejected the request (${reason.replace('Gemini API returned ', '')}). Recipes stay as they are until it works.` : `Gemini could not be used: ${reason}`,
+        nextAt: Date.now() + STOPPED_RETRY_MS,
+        failures: (doc.status.failures || 0) + 1,
+        updatedAt: Date.now(),
+      };
+      await writeWork(env, doc);
+      log('error', { event: 'feedback_stopped', reason });
+      return 'stopped';
+    }
+  }
+  return processed > 0 ? 'processed' : 'skipped';
 }
 
 // ---- photo imports ----------------------------------------------------------------------------------------

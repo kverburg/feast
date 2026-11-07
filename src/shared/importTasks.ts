@@ -69,13 +69,14 @@ export function dropDefaultSeasoningAmounts(sections: IngredientSection[]): Ingr
   }));
 }
 
-// Models are unreliable with ids, types and counts; rebuild a clean recipe from their answer.
-export function normalizeParsedRecipe(raw: any): Partial<Recipe> {
-  const toNumber = (v: unknown, fallback: number) => {
-    const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(',', '.'));
-    return Number.isFinite(n) ? n : fallback;
-  };
-  const sections: IngredientSection[] = (Array.isArray(raw.ingredientSections) ? raw.ingredientSections : [])
+const toNumber = (v: unknown, fallback: number) => {
+  const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(',', '.'));
+  return Number.isFinite(n) ? n : fallback;
+};
+
+/** Clean ingredient sections from a model's answer: ids, numbers and empty items are rebuilt. */
+export function normalizeSections(raw: unknown): IngredientSection[] {
+  const sections: IngredientSection[] = (Array.isArray(raw) ? raw : [])
     .map((sec: any) => ({
       id: uid('sec'),
       title: String(sec?.title || 'Ingredients'),
@@ -90,7 +91,12 @@ export function normalizeParsedRecipe(raw: any): Partial<Recipe> {
         })),
     }))
     .filter((sec: IngredientSection) => sec.items.length > 0);
-  const steps: InstructionStep[] = (Array.isArray(raw.instructions) ? raw.instructions : [])
+  return dropDefaultSeasoningAmounts(sections);
+}
+
+/** Clean steps from a model's answer. */
+export function normalizeSteps(raw: unknown): InstructionStep[] {
+  return (Array.isArray(raw) ? raw : [])
     .filter((st: any) => st && String(st.text || '').trim())
     .map((st: any, i: number) => ({
       id: uid('st'),
@@ -98,7 +104,10 @@ export function normalizeParsedRecipe(raw: any): Partial<Recipe> {
       text: String(st.text).trim(),
       timerMinutes: st.timerMinutes ? toNumber(st.timerMinutes, 0) || undefined : undefined,
     }));
+}
 
+// Models are unreliable with ids, types and counts; rebuild a clean recipe from their answer.
+export function normalizeParsedRecipe(raw: any): Partial<Recipe> {
   return {
     title: String(raw.title || '').trim() || 'Imported Recipe',
     description: String(raw.description || '').trim(),
@@ -106,8 +115,8 @@ export function normalizeParsedRecipe(raw: any): Partial<Recipe> {
     servings: Math.max(1, Math.round(toNumber(raw.servings, 4))),
     prepTime: Math.max(0, Math.round(toNumber(raw.prepTime, 15))),
     cookTime: Math.max(0, Math.round(toNumber(raw.cookTime, 20))),
-    ingredientSections: dropDefaultSeasoningAmounts(sections),
-    instructions: steps,
+    ingredientSections: normalizeSections(raw.ingredientSections),
+    instructions: normalizeSteps(raw.instructions),
   };
 }
 

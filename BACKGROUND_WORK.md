@@ -75,3 +75,11 @@ A photo import is read by the worker, so it keeps going when the app is closed:
 3. The app collects the patch (it polls every 8 seconds while imports wait, also after a reload), saves the recipe as `imp-<job id>` (so two devices do not both add it), logs it in the activity log and starts its translation.
 
 Without a server (local dev), or when the upload fails, the app reads the photo itself as before (the import job then only lives while the page is open).
+
+## Recipe feedback
+
+The Feedback button on a recipe sends a remark to the server (`POST /api/feedback`, with the recipe as the app has it). The worker keeps it as a proposal in KV key `proposals` and queues its id in the work document (`feedbackQueue`), so it is made also when the app is closed:
+
+1. The cron (or the request itself) asks the AI for a proposal with direct calls (`src/shared/feedbackTask.ts`): a summary, bullet points and only the fields that change. Busy/rate limited: backs off and retries; unreadable answers: 3 tries, then `failed` with the reason.
+2. When it is `ready`, a push notification goes out ("Recept om te checken: ...", opens `#/settings/review`). The app also polls every minute while open (badge on Settings, toast).
+3. Settings > Recipes to check lists them: Approve (the app applies the fields, drops the second language and queues a fresh translation and annotation), Decline, or Add comment (the AI starts again from the original recipe with the remark and its earlier proposal). If the recipe was edited after the feedback was sent, approving asks first.

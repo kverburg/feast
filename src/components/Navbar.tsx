@@ -1,4 +1,5 @@
 import React from 'react';
+import { useReviewCount } from '../services/reviewWatcher';
 import { Loader2, AlertTriangle, UtensilsCrossed, ShoppingBag, Settings, Sun, Moon, Search, Plus, CalendarDays, X } from 'lucide-react';
 
 interface NavbarProps {
@@ -30,6 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   importFailed,
   onOpenActivity,
 }) => {
+  const reviewCount = useReviewCount();
   return (
     <>
       {/* Desktop & Header Bar */}
@@ -115,6 +117,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button className={`nav-desktop-only btn btn-secondary btn-icon ${currentTab === 'settings' ? 'active' : ''}`} onClick={() => setCurrentTab('settings')} title="Settings & Backup">
               <Settings size={18} />
+              {reviewCount > 0 && <span className="review-dot" aria-label={`${reviewCount} recipes to check`}>{reviewCount}</span>}
             </button>
           </div>
         </div>
@@ -158,7 +161,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           className={`mobile-nav-item ${currentTab === 'settings' ? 'active' : ''}`}
           onClick={() => setCurrentTab('settings')}
         >
-          <Settings size={20} />
+          <span className="nav-icon-wrap">
+            <Settings size={20} />
+            {reviewCount > 0 && <span className="review-dot" aria-label={`${reviewCount} recipes to check`}>{reviewCount}</span>}
+          </span>
           <span>Settings</span>
         </button>
       </nav>
@@ -262,6 +268,24 @@ export const Navbar: React.FC<NavbarProps> = ({
         .lang-btn:hover:not(.active) {
           background: var(--bg-card-hover);
         }
+        .review-dot {
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          min-width: 18px;
+          height: 18px;
+          padding: 0 5px;
+          border-radius: 9px;
+          background: #ef4444;
+          color: #fff;
+          font-size: 0.7rem;
+          font-weight: 700;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .nav-icon-wrap { position: relative; display: inline-flex; }
+        .btn-icon { position: relative; }
         .search-box {
           position: relative;
           flex: 1;
