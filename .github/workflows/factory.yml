@@ -1,0 +1,39 @@
+# Copy this file into each app repo as .github/workflows/factory.yml
+# and it already points at kverburg/factory.
+name: Factory
+
+on:
+  # Sent by the relay when a Linear issue moves to "Agent Ready".
+  repository_dispatch:
+    types: [factory-build]
+  # PRs you open yourself get the same review.
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: factory-${{ github.event.client_payload.identifier || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name == 'repository_dispatch'
+    uses: kverburg/factory/.github/workflows/build.yml@main
+    secrets: inherit
+
+  review:
+    needs: build
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+       needs.build.outputs.pr_number != '')
+    uses: kverburg/factory/.github/workflows/review.yml@main
+    with:
+      pr_number: ${{ needs.build.outputs.pr_number || github.event.pull_request.number }}
+    secrets: inherit
